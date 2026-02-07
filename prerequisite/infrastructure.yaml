@@ -1,5 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'AIOps Agent - IAM Role, SSM Parameters for Bedrock AgentCore'
+Description: 'AIOps Agent - IAM Role, Lambda, SSM Parameters for Bedrock AgentCore'
+
+Parameters:
+  LambdaS3Bucket:
+    Type: String
+    Description: 'S3 bucket containing the Lambda deployment package'
+  LambdaS3Key:
+    Type: String
+    Default: 'aiops-gateway/lambda.zip'
+    Description: 'S3 key for the Lambda deployment package'
 
 Resources:
 
@@ -161,6 +170,120 @@ Resources:
                   - rds:DescribeDBInstances
                 Resource: '*'
 
+  # -----------------------------------------------------------------------
+  # Gateway AgentCore Role — bedrock-agentcore.amazonaws.com 가 Lambda 를 호출
+  # -----------------------------------------------------------------------
+  GatewayAgentCoreRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AIOpsGatewayAgentCoreRole-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock-agentcore.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: AIOpsGatewayInvokeLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt AIOpsGatewayLambda.Arn
+
+  # -----------------------------------------------------------------------
+  # Lambda 실행 역할 — AIOps 읽기 전용 권한
+  # -----------------------------------------------------------------------
+  AIOpsGatewayLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AIOpsGatewayLambdaRole-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AIOpsLambdaReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AIOpsReadOnlyAccess
+                Effect: Allow
+                Action:
+                  # CloudWatch
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:DescribeLogGroups
+                  # EC2
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  # Cost Explorer
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - ce:GetRightsizingRecommendation
+                  # Security Hub & GuardDuty
+                  - securityhub:GetFindings
+                  - guardduty:ListDetectors
+                  - guardduty:ListFindings
+                  - guardduty:GetFindings
+                  # IAM (read-only)
+                  - iam:GenerateCredentialReport
+                  - iam:GetCredentialReport
+                  - iam:ListUsers
+                  - iam:ListRoles
+                  # Other services
+                  - s3:ListAllMyBuckets
+                  - lambda:ListFunctions
+                  - rds:DescribeDBInstances
+                Resource: '*'
+
+  # -----------------------------------------------------------------------
+  # Lambda 함수 — Gateway 도구 디스패처
+  # -----------------------------------------------------------------------
+  AIOpsGatewayLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'aiops-gateway-tools-${AWS::Region}'
+      Runtime: python3.11
+      Handler: gateway/lambda_handler.lambda_handler
+      Role: !GetAtt AIOpsGatewayLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          AWS_REGION_OVERRIDE: !Ref AWS::Region
+          LOG_LEVEL: INFO
+
   # SSM Parameters
   RuntimeRoleArnParameter:
     Type: AWS::SSM::Parameter
@@ -170,9 +293,31 @@ Resources:
       Value: !GetAtt RuntimeAgentCoreRole.Arn
       Description: 'AIOps AgentCore Runtime Execution Role ARN'
 
+  GatewayRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/agentcore/gateway_role_arn'
+      Type: String
+      Value: !GetAtt GatewayAgentCoreRole.Arn
+      Description: 'AIOps Gateway AgentCore Role ARN'
+
+  GatewayLambdaArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/agentcore/gateway_lambda_arn'
+      Type: String
+      Value: !GetAtt AIOpsGatewayLambda.Arn
+      Description: 'AIOps Gateway Lambda Function ARN'
+
 Outputs:
   RuntimeRoleArn:
     Description: 'AgentCore Runtime Role ARN'
     Value: !GetAtt RuntimeAgentCoreRole.Arn
     Export:
       Name: !Sub '${AWS::StackName}-RuntimeRoleArn'
+  GatewayRoleArn:
+    Description: 'Gateway AgentCore Role ARN'
+    Value: !GetAtt GatewayAgentCoreRole.Arn
+  GatewayLambdaArn:
+    Description: 'Gateway Lambda Function ARN'
+    Value: !GetAtt AIOpsGatewayLambda.Arn

@@ -1,0 +1,428 @@
+[
+  {
+    "name": "get_cloudwatch_metrics",
+    "description": "CloudWatch 메트릭 데이터를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "AWS 서비스 네임스페이스 (예: AWS/EC2, AWS/Lambda)"
+        },
+        "metric_name": {
+          "type": "string",
+          "description": "메트릭 이름 (예: CPUUtilization, Invocations)"
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "Name": {"type": "string"},
+              "Value": {"type": "string"}
+            },
+            "required": ["Name", "Value"]
+          },
+          "description": "메트릭 차원 리스트"
+        },
+        "period_hours": {
+          "type": "integer",
+          "description": "조회할 기간 (시간 단위, 기본값: 1)",
+          "default": 1
+        }
+      },
+      "required": ["namespace", "metric_name"]
+    }
+  },
+  {
+    "name": "get_cloudwatch_alarms",
+    "description": "CloudWatch 알람 상태를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "alarm_name_prefix": {
+          "type": "string",
+          "description": "알람 이름 접두사로 필터링"
+        },
+        "state": {
+          "type": "string",
+          "description": "알람 상태로 필터링 (OK, ALARM, INSUFFICIENT_DATA)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "query_cloudwatch_logs",
+    "description": "CloudWatch Logs Insights 쿼리를 실행합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "log_group_name": {
+          "type": "string",
+          "description": "로그 그룹 이름"
+        },
+        "query": {
+          "type": "string",
+          "description": "Logs Insights 쿼리 문자열"
+        },
+        "hours": {
+          "type": "integer",
+          "description": "조회할 기간 (시간 단위, 기본값: 1)",
+          "default": 1
+        },
+        "limit": {
+          "type": "integer",
+          "description": "결과 최대 개수 (기본값: 100)",
+          "default": 100
+        }
+      },
+      "required": ["log_group_name", "query"]
+    }
+  },
+  {
+    "name": "describe_ec2_instances",
+    "description": "EC2 인스턴스 정보를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instance_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 인스턴스 ID 목록"
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "Name": {"type": "string"},
+              "Values": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            },
+            "required": ["Name", "Values"]
+          },
+          "description": "필터 조건"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_cost_and_usage",
+    "description": "AWS 비용 및 사용량을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "description": "조회할 기간 (일 단위, 기본값: 30)",
+          "default": 30
+        },
+        "granularity": {
+          "type": "string",
+          "description": "집계 단위 (DAILY, MONTHLY)",
+          "default": "MONTHLY"
+        },
+        "group_by": {
+          "type": "string",
+          "description": "그룹 기준 (SERVICE, LINKED_ACCOUNT, REGION)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_cost_forecast",
+    "description": "AWS 비용 예측을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "description": "예측 기간 (일 단위, 기본값: 30)",
+          "default": 30
+        },
+        "granularity": {
+          "type": "string",
+          "description": "집계 단위 (DAILY, MONTHLY)",
+          "default": "MONTHLY"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_rightsizing_recommendations",
+    "description": "라이트사이징 권장 사항을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "service": {
+          "type": "string",
+          "description": "서비스 이름 (기본값: AmazonEC2)",
+          "default": "AmazonEC2"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_cost_by_service",
+    "description": "서비스별 비용을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "description": "조회할 기간 (일 단위, 기본값: 30)",
+          "default": 30
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_security_findings",
+    "description": "AWS Security Hub 보안 발견 사항을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "심각도 필터 (CRITICAL, HIGH, MEDIUM, LOW, INFORMATIONAL)"
+        },
+        "status": {
+          "type": "string",
+          "description": "상태 필터 (ACTIVE, ARCHIVED, RESOLVED)",
+          "default": "ACTIVE"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "최대 결과 수 (기본값: 50)",
+          "default": 50
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_guardduty_findings",
+    "description": "AWS GuardDuty 위협 탐지 결과를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "심각도 필터 (HIGH, MEDIUM, LOW)"
+        },
+        "max_results": {
+          "type": "integer",
+          "description": "최대 결과 수 (기본값: 50)",
+          "default": 50
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_iam_credential_report",
+    "description": "IAM 자격 증명 보고서를 생성하고 분석합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_ec2_instances",
+    "description": "EC2 인스턴스 목록을 조회합니다 (페이지네이션 지원)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "description": "인스턴스 상태 필터 (running, stopped, terminated)"
+        },
+        "instance_type": {
+          "type": "string",
+          "description": "인스턴스 유형 필터 (t3.micro, m5.large 등)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "get_instance_status",
+    "description": "EC2 인스턴스의 시스템 상태 및 인스턴스 상태 검사를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "instance_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 인스턴스 ID 목록"
+        }
+      },
+      "required": ["instance_ids"]
+    }
+  },
+  {
+    "name": "get_ebs_volumes",
+    "description": "EBS 볼륨 정보를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "volume_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 볼륨 ID 목록"
+        },
+        "state": {
+          "type": "string",
+          "description": "볼륨 상태 필터 (available, in-use, creating, deleting)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "describe_vpcs",
+    "description": "VPC 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "vpc_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 VPC ID 목록"
+        },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "Name": {"type": "string"},
+              "Values": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            },
+            "required": ["Name", "Values"]
+          },
+          "description": "필터 조건"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "describe_subnets",
+    "description": "서브넷 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "subnet_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 서브넷 ID 목록"
+        },
+        "vpc_id": {
+          "type": "string",
+          "description": "특정 VPC의 서브넷만 조회"
+        },
+        "availability_zone": {
+          "type": "string",
+          "description": "특정 AZ의 서브넷만 조회"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "describe_security_groups",
+    "description": "보안 그룹 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "group_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 보안 그룹 ID 목록"
+        },
+        "vpc_id": {
+          "type": "string",
+          "description": "특정 VPC의 보안 그룹만 조회"
+        },
+        "group_name": {
+          "type": "string",
+          "description": "보안 그룹 이름으로 필터링"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "describe_route_tables",
+    "description": "라우팅 테이블 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "route_table_ids": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "조회할 라우팅 테이블 ID 목록"
+        },
+        "vpc_id": {
+          "type": "string",
+          "description": "특정 VPC의 라우팅 테이블만 조회"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "analyze_network_topology",
+    "description": "VPC의 전체 네트워크 토폴로지를 분석합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "vpc_id": {
+          "type": "string",
+          "description": "분석할 VPC ID"
+        }
+      },
+      "required": ["vpc_id"]
+    }
+  },
+  {
+    "name": "get_resource_summary",
+    "description": "전체 AWS 자산 요약을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_resources_by_type",
+    "description": "지정된 유형의 AWS 리소스 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "resource_type": {
+          "type": "string",
+          "description": "리소스 유형 (ec2, s3, rds, lambda, vpc, security_group, ebs)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "최대 결과 수 (기본값: 100)",
+          "default": 100
+        }
+      },
+      "required": ["resource_type"]
+    }
+  }
+]

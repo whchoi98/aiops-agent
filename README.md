@@ -32,8 +32,12 @@ aiops_agent/
 │   ├── ec2_tools.py         # EC2 인스턴스 관리
 │   ├── vpc_tools.py         # VPC 네트워크 분석
 │   └── resource_inventory.py # 리소스 인벤토리
+├── gateway/
+│   ├── api_spec.json        # 21개 도구 MCP 스키마 정의
+│   ├── lambda_handler.py    # Lambda 디스패치 핸들러
+│   └── setup_gateway.py     # Gateway 생성/삭제 스크립트
 ├── prerequisite/
-│   ├── infrastructure.yaml  # CloudFormation (IAM Role, SSM)
+│   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM)
 │   └── deploy.sh            # 인프라 배포 스크립트
 ├── scripts/
 │   ├── setup.sh             # 환경 설정
@@ -76,6 +80,38 @@ print(response)
 ```bash
 python -m agents.runtime
 ```
+
+## AgentCore Gateway (MCP)
+
+21개 AIOps 도구를 MCP 프로토콜로 노출하여 다른 에이전트/서비스에서 재사용할 수 있습니다.
+[E2E 튜토리얼 lab-03](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/01-tutorials/09-AgentCore-E2E) 패턴을 따릅니다.
+
+### Gateway 설정
+
+```bash
+# 1. 인프라 배포 (Lambda + IAM Role)
+bash prerequisite/deploy.sh
+
+# 2. Gateway 생성 (Cognito + MCP Gateway + Lambda Target)
+python -m gateway.setup_gateway
+
+# 3. Gateway 삭제
+python -m gateway.setup_gateway --delete
+```
+
+### 구성 요소
+
+| 컴포넌트 | 설명 |
+|----------|------|
+| `gateway/api_spec.json` | 21개 도구의 MCP JSON Schema 정의 |
+| `gateway/lambda_handler.py` | Lambda 디스패치 핸들러 (도구 라우팅) |
+| `gateway/setup_gateway.py` | Gateway + Cognito + Target 생성/삭제 |
+| `AIOpsGatewayLambda` | CloudFormation Lambda 함수 |
+| `GatewayAgentCoreRole` | Gateway → Lambda 호출 IAM 역할 |
+
+### 인증
+
+Cognito JWT 기반 인증을 사용합니다. Gateway 생성 시 자동으로 Cognito User Pool 이 생성됩니다.
 
 ## 테스트
 
