@@ -35,6 +35,8 @@ aiops_agent/
 │   ├── api_spec.json        # 21개 도구 MCP 스키마 정의
 │   ├── lambda_handler.py    # Lambda 디스패치 핸들러
 │   └── setup_gateway.py     # Gateway 생성/삭제 스크립트
+├── configs/
+│   └── mcp_servers.yaml     # MCP 서버 설정 (외부 MCP 연결 관리)
 ├── prerequisite/
 │   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM)
 │   └── deploy.sh            # 인프라 배포 스크립트
@@ -112,6 +114,45 @@ python -m gateway.setup_gateway --delete
 ### 인증
 
 Cognito JWT 기반 인증을 사용합니다. Gateway 생성 시 자동으로 Cognito User Pool 이 생성됩니다.
+
+## 외부 MCP 서버 연동
+
+`configs/mcp_servers.yaml` 에서 외부 MCP 서버를 설정 기반으로 관리합니다.
+MCP 서버 추가 시 설정 파일만 수정하면 되고, 코드 변경은 필요 없습니다.
+
+```yaml
+# configs/mcp_servers.yaml
+mcp_servers:
+  - name: aws-cloudwatch
+    enabled: true
+    transport: stdio
+    command: uvx
+    args: [awslabs.cloudwatch-mcp-server@latest]
+    env:
+      AWS_REGION: "${AWS_REGION}"
+```
+
+### 지원 transport
+
+| Transport | 설명 | 용도 |
+|-----------|------|------|
+| `stdio` | 로컬 프로세스로 MCP 서버 실행 | AWS 공식 MCP 서버 (uvx/npx) |
+| `streamable_http` | HTTP 엔드포인트에 연결 | 원격 MCP 서버 |
+
+### MCP 서버 추가 방법
+
+`configs/mcp_servers.yaml` 에 항목을 추가합니다:
+
+```yaml
+mcp_servers:
+  - name: my-new-mcp
+    enabled: true
+    transport: stdio
+    command: uvx
+    args: [my-mcp-package@latest]
+    env:
+      AWS_REGION: "${AWS_REGION}"
+```
 
 ## 테스트
 

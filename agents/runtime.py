@@ -1,5 +1,15 @@
-"""AgentCore Runtime 엔트리포인트 (E2E lab4 패턴)"""
+"""AgentCore Runtime 엔트리포인트 (E2E lab4 패턴)
+
+MCP 연결 구조:
+  1. AgentCore Gateway — 우리 커스텀 도구(18개)를 MCP 로 노출
+  2. 외부 MCP 서버   — AWS 공식 MCP 서버 등을 설정 기반으로 연결
+  3. 로컬 도구        — @tool 데코레이터로 정의된 함수들
+
+설정: configs/mcp_servers.yaml
+"""
 from __future__ import annotations
+
+from contextlib import ExitStack
 
 import boto3
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
@@ -8,6 +18,7 @@ from strands.models import BedrockModel
 from strands.tools.mcp import MCPClient
 
 from agents.aiops_agent import MODEL_ID, SYSTEM_PROMPT, TOOLS
+from agents.mcp_manager import create_mcp_clients, load_mcp_config
 from agents.memory import (
     ACTOR_ID,
     SESSION_ID,
@@ -27,6 +38,9 @@ try:
 except Exception:
     memory_hooks = None  # type: ignore[assignment]
 
+# MCP 설정 로드
+mcp_config = load_mcp_config()
+
 # AgentCore Runtime App
 app = BedrockAgentCoreApp()
 
@@ -39,51 +53,42 @@ async def invoke(payload, context=None):
     request_headers = (context.request_headers or {}) if context else {}
     auth_header = request_headers.get("Authorization", "")
 
-    # Gateway 연결 (선택적)
-    gateway_id = None
-    try:
-        gateway_id = get_ssm_parameter(f"{SSM_PREFIX}/gateway_id")
-    except Exception:
-        pass
-
     hooks = [memory_hooks] if memory_hooks else []
+    all_tools = list(TOOLS)
 
-    if gateway_id and auth_header:
-        try:
-            from mcp.client.streamable_http import streamablehttp_client
+    with ExitStack() as stack:
+        # 1. AgentCore Gateway 연결 (선택적)
+        if mcp_config.get("gateway", {}).get("enabled") and auth_header:
+            try:
+                gateway_id = get_ssm_parameter(f"{SSM_PREFIX}/gateway_id")
+                from mcp.client.streamable_http import streamablehttp_client
 
-            gateway_client = boto3.client(
-                "bedrock-agentcore-control", region_name=REGION
-            )
-            gateway_response = gateway_client.get_gateway(
-                gatewayIdentifier=gateway_id
-            )
-            gateway_url = gateway_response["gatewayUrl"]
-
-            mcp_client = MCPClient(
-                lambda: streamablehttp_client(
-                    url=gateway_url, headers={"Authorization": auth_header}
+                gw_api = boto3.client(
+                    "bedrock-agentcore-control", region_name=REGION
                 )
-            )
+                gw_response = gw_api.get_gateway(gatewayIdentifier=gateway_id)
+                gw_url = gw_response["gatewayUrl"]
 
-            with mcp_client:
-                all_tools = TOOLS + mcp_client.list_tools_sync()
-                agent = Agent(
-                    model=model,
-                    tools=all_tools,
-                    system_prompt=SYSTEM_PROMPT,
-                    hooks=hooks,
+                gw_mcp = MCPClient(
+                    lambda url=gw_url, hdr=auth_header: streamablehttp_client(
+                        url=url, headers={"Authorization": hdr}
+                    )
                 )
-                response = agent(user_input)
-                return response.message["content"][0]["text"]
-        except Exception as e:
-            print(f"MCP client error: {e}")
-            return f"Error: {e}"
-    else:
-        # 로컬 도구만 사용
+                stack.enter_context(gw_mcp)
+                gw_tools = gw_mcp.list_tools_sync()
+                all_tools.extend(gw_tools)
+                print(f"Gateway: {len(gw_tools)} tools loaded")
+            except Exception as e:
+                print(f"Gateway connection failed: {e}")
+
+        # 2. 외부 MCP 서버 연결 (configs/mcp_servers.yaml)
+        mcp_tools = create_mcp_clients(mcp_config, stack)
+        all_tools.extend(mcp_tools)
+
+        # 3. 에이전트 생성 및 실행
         agent = Agent(
             model=model,
-            tools=TOOLS,
+            tools=all_tools,
             system_prompt=SYSTEM_PROMPT,
             hooks=hooks,
         )

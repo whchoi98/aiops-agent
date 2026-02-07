@@ -1,0 +1,47 @@
+# AIOps Agent — MCP 서버 설정
+#
+# 에이전트가 소비할 외부 MCP 서버를 정의합니다.
+# 새 MCP 서버 추가 시 mcp_servers 리스트에 항목을 추가하세요.
+#
+# 지원 transport:
+#   - stdio: 로컬 프로세스로 MCP 서버 실행 (command + args)
+#   - streamable_http: HTTP 엔드포인트에 연결 (url + headers)
+
+# ------------------------------------------------------------------
+# AgentCore Gateway (우리 커스텀 도구를 외부에 제공)
+# gateway_id, gateway_url 은 SSM 에서 자동 조회
+# ------------------------------------------------------------------
+gateway:
+  enabled: true
+
+# ------------------------------------------------------------------
+# 외부 MCP 서버 (에이전트가 소비)
+# ------------------------------------------------------------------
+mcp_servers:
+  # AWS CloudWatch MCP — 메트릭/알람/로그/이상탐지
+  - name: aws-cloudwatch
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudwatch-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # 향후 추가 예시:
+  #
+  # - name: aws-cost-explorer
+  #   enabled: false
+  #   transport: stdio
+  #   command: uvx
+  #   args:
+  #     - awslabs.cost-explorer-mcp-server@latest
+  #   env:
+  #     AWS_REGION: "${AWS_REGION}"
+  #
+  # - name: custom-http-mcp
+  #   enabled: false
+  #   transport: streamable_http
+  #   url: https://mcp.example.com/sse
+  #   headers:
+  #     Authorization: "Bearer ${MCP_TOKEN}"
