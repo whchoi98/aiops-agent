@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AIOps Agent - IAM Role, SSM Parameters for Bedrock AgentCore'
+
+Resources:
+
+  RuntimeAgentCoreRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AIOpsBedrockAgentCoreRole-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock-agentcore.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: AIOpsAgentCorePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # ECR Image Access
+              - Sid: ECRImageAccess
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/bedrock_agentcore-aiops*'
+              # ECR Token
+              - Sid: ECRTokenAccess
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*'
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
+              # X-Ray
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+              # CloudWatch Metrics
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: bedrock-agentcore
+              # Bedrock Model Invocation
+              - Sid: BedrockModelInvocation
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:ApplyGuardrail
+                  - bedrock:Retrieve
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+              # AgentCore Identity
+              - Sid: GetAgentAccessToken
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetWorkloadAccessToken
+                  - bedrock-agentcore:GetWorkloadAccessTokenForJWT
+                  - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/aiops*'
+              # AgentCore Memory
+              - Sid: AllowAgentToUseMemory
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:GetMemoryRecord
+                  - bedrock-agentcore:GetMemory
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                  - bedrock-agentcore:ListMemoryRecords
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+              # AgentCore Gateway
+              - Sid: GatewayAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetGateway
+                  - bedrock-agentcore:InvokeGateway
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*'
+              # SSM Parameter Store
+              - Sid: SSMParameterAccess
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/aiops/*'
+              # AIOps Read-Only Access
+              - Sid: AIOpsReadOnlyAccess
+                Effect: Allow
+                Action:
+                  # CloudWatch
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  # EC2
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  # Cost Explorer
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - ce:GetRightsizingRecommendation
+                  # Security Hub & GuardDuty
+                  - securityhub:GetFindings
+                  - guardduty:ListDetectors
+                  - guardduty:ListFindings
+                  - guardduty:GetFindings
+                  # IAM (read-only)
+                  - iam:GenerateCredentialReport
+                  - iam:GetCredentialReport
+                  - iam:ListUsers
+                  - iam:ListRoles
+                  # Other services
+                  - s3:ListAllMyBuckets
+                  - lambda:ListFunctions
+                  - rds:DescribeDBInstances
+                Resource: '*'
+
+  # SSM Parameters
+  RuntimeRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/agentcore/runtime_execution_role_arn'
+      Type: String
+      Value: !GetAtt RuntimeAgentCoreRole.Arn
+      Description: 'AIOps AgentCore Runtime Execution Role ARN'
+
+Outputs:
+  RuntimeRoleArn:
+    Description: 'AgentCore Runtime Role ARN'
+    Value: !GetAtt RuntimeAgentCoreRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RuntimeRoleArn'
