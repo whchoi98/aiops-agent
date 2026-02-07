@@ -22,13 +22,8 @@ if _LAMBDA_TASK_ROOT and _LAMBDA_TASK_ROOT not in sys.path:
 
 # ---------------------------------------------------------------------------
 # 도구 임포트 — @tool 데코레이터가 붙어 있지만 일반 호출도 가능
+# CloudWatch 도구는 AWS 공식 CloudWatch MCP 서버로 대체
 # ---------------------------------------------------------------------------
-from tools.cloudwatch_tools import (  # noqa: E402
-    describe_ec2_instances,
-    get_cloudwatch_alarms,
-    get_cloudwatch_metrics,
-    query_cloudwatch_logs,
-)
 from tools.cost_explorer_tools import (  # noqa: E402
     get_cost_and_usage,
     get_cost_by_service,
@@ -36,6 +31,7 @@ from tools.cost_explorer_tools import (  # noqa: E402
     get_rightsizing_recommendations,
 )
 from tools.ec2_tools import (  # noqa: E402
+    describe_ec2_instances,
     get_ebs_volumes,
     get_instance_status,
     list_ec2_instances,
@@ -61,10 +57,7 @@ from tools.vpc_tools import (  # noqa: E402
 # 도구 레지스트리 — {tool_name: callable}
 # ---------------------------------------------------------------------------
 TOOL_REGISTRY: dict[str, Any] = {
-    # 모니터링
-    "get_cloudwatch_metrics": get_cloudwatch_metrics,
-    "get_cloudwatch_alarms": get_cloudwatch_alarms,
-    "query_cloudwatch_logs": query_cloudwatch_logs,
+    # EC2
     "describe_ec2_instances": describe_ec2_instances,
     # 비용
     "get_cost_and_usage": get_cost_and_usage,

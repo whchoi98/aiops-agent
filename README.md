@@ -9,7 +9,7 @@ AWS 인프라를 지능적으로 모니터링하고 운영하는 AIOps 에이전
 
 ### 핵심 기능
 
-- **CloudWatch 모니터링**: 메트릭/알람/로그 분석
+- **CloudWatch 모니터링**: AWS 공식 CloudWatch MCP 서버 연동 (메트릭/알람/로그/이상탐지)
 - **비용 최적화**: Cost Explorer 기반 비용 분석 및 라이트사이징 권장
 - **보안 점검**: Security Hub, GuardDuty 통합
 - **EC2 관리**: 인스턴스 상태, EBS 볼륨 관리
@@ -26,7 +26,6 @@ aiops_agent/
 │   ├── runtime.py           # AgentCore Runtime 엔트리포인트
 │   └── utils.py             # SSM, IAM, 설정 유틸리티
 ├── tools/
-│   ├── cloudwatch_tools.py  # CloudWatch 메트릭/알람/로그
 │   ├── cost_explorer_tools.py # 비용 분석
 │   ├── security_tools.py    # Security Hub / GuardDuty
 │   ├── ec2_tools.py         # EC2 인스턴스 관리
@@ -83,7 +82,8 @@ python -m agents.runtime
 
 ## AgentCore Gateway (MCP)
 
-21개 AIOps 도구를 MCP 프로토콜로 노출하여 다른 에이전트/서비스에서 재사용할 수 있습니다.
+18개 AIOps 도구를 MCP 프로토콜로 노출하여 다른 에이전트/서비스에서 재사용할 수 있습니다.
+CloudWatch 모니터링은 AWS 공식 CloudWatch MCP 서버로 대체되었습니다.
 [E2E 튜토리얼 lab-03](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/01-tutorials/09-AgentCore-E2E) 패턴을 따릅니다.
 
 ### Gateway 설정
@@ -103,7 +103,7 @@ python -m gateway.setup_gateway --delete
 
 | 컴포넌트 | 설명 |
 |----------|------|
-| `gateway/api_spec.json` | 21개 도구의 MCP JSON Schema 정의 |
+| `gateway/api_spec.json` | 18개 도구의 MCP JSON Schema 정의 |
 | `gateway/lambda_handler.py` | Lambda 디스패치 핸들러 (도구 라우팅) |
 | `gateway/setup_gateway.py` | Gateway + Cognito + Target 생성/삭제 |
 | `AIOpsGatewayLambda` | CloudFormation Lambda 함수 |
@@ -128,12 +128,11 @@ python -m pytest tests/test_local.py -v
 
 ## 도구 목록
 
+### 로컬 도구
+
 | 모듈 | 도구 | 설명 |
 |------|------|------|
-| cloudwatch_tools | `get_cloudwatch_metrics` | CloudWatch 메트릭 조회 |
-| cloudwatch_tools | `get_cloudwatch_alarms` | 알람 상태 조회 |
-| cloudwatch_tools | `query_cloudwatch_logs` | Logs Insights 쿼리 |
-| cloudwatch_tools | `describe_ec2_instances` | EC2 인스턴스 정보 |
+| ec2_tools | `describe_ec2_instances` | EC2 인스턴스 정보 |
 | cost_explorer_tools | `get_cost_and_usage` | 비용 및 사용량 |
 | cost_explorer_tools | `get_cost_forecast` | 비용 예측 |
 | cost_explorer_tools | `get_rightsizing_recommendations` | 라이트사이징 권장 |
@@ -151,6 +150,22 @@ python -m pytest tests/test_local.py -v
 | vpc_tools | `analyze_network_topology` | 네트워크 토폴로지 분석 |
 | resource_inventory | `get_resource_summary` | 전체 자산 요약 |
 | resource_inventory | `list_resources_by_type` | 유형별 리소스 목록 |
+
+### AWS CloudWatch MCP (외부)
+
+CloudWatch 모니터링은 AWS 공식 CloudWatch MCP 서버로 대체되었습니다.
+Gateway 또는 MCP 클라이언트를 통해 다음 도구에 접근할 수 있습니다.
+
+| MCP 도구 | 설명 |
+|----------|------|
+| `get_metric_data` | 메트릭 데이터 조회 (고급 필터링/페이지네이션) |
+| `analyze_metric` | 메트릭 트렌드/계절성 분석 |
+| `get_active_alarms` | 활성 알람 조회 |
+| `get_alarm_history` | 알람 상태 이력 |
+| `get_recommended_metric_alarms` | 알람 임계값 추천 |
+| `execute_log_insights_query` | Logs Insights 쿼리 |
+| `analyze_log_group` | 로그 이상 탐지/패턴 분석 |
+| `describe_log_groups` | 로그 그룹 목록 |
 
 ## 환경 변수
 

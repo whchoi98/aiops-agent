@@ -191,3 +191,60 @@ def get_ebs_volumes(
         "total_size_gb": sum(v["size_gb"] for v in volumes),
         "volumes": volumes,
     }
+
+
+@tool
+def describe_ec2_instances(
+    instance_ids: list[str] | None = None,
+    filters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """EC2 인스턴스 정보를 조회합니다.
+
+    Args:
+        instance_ids: 조회할 인스턴스 ID 목록 (선택)
+        filters: 필터 조건 (예: [{"Name": "instance-state-name", "Values": ["running"]}])
+
+    Returns:
+        EC2 인스턴스 목록과 상태 정보
+    """
+    client = _get_ec2_client()
+
+    params: dict[str, Any] = {}
+    if instance_ids:
+        params["InstanceIds"] = instance_ids
+    if filters:
+        params["Filters"] = filters
+
+    response = client.describe_instances(**params)
+
+    instances = []
+    for reservation in response.get("Reservations", []):
+        for instance in reservation.get("Instances", []):
+            name_tag = next(
+                (
+                    tag["Value"]
+                    for tag in instance.get("Tags", [])
+                    if tag["Key"] == "Name"
+                ),
+                "N/A",
+            )
+            instances.append({
+                "instance_id": instance["InstanceId"],
+                "name": name_tag,
+                "type": instance["InstanceType"],
+                "state": instance["State"]["Name"],
+                "private_ip": instance.get("PrivateIpAddress"),
+                "public_ip": instance.get("PublicIpAddress"),
+                "launch_time": (
+                    instance["LaunchTime"].isoformat()
+                    if instance.get("LaunchTime")
+                    else None
+                ),
+            })
+
+    return {
+        "total_count": len(instances),
+        "running_count": sum(1 for i in instances if i["state"] == "running"),
+        "stopped_count": sum(1 for i in instances if i["state"] == "stopped"),
+        "instances": instances,
+    }

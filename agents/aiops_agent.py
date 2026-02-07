@@ -4,19 +4,18 @@ from __future__ import annotations
 from strands import Agent
 from strands.models import BedrockModel
 
-from tools.cloudwatch_tools import (
-    describe_ec2_instances,
-    get_cloudwatch_alarms,
-    get_cloudwatch_metrics,
-    query_cloudwatch_logs,
-)
 from tools.cost_explorer_tools import (
     get_cost_and_usage,
     get_cost_by_service,
     get_cost_forecast,
     get_rightsizing_recommendations,
 )
-from tools.ec2_tools import get_ebs_volumes, get_instance_status, list_ec2_instances
+from tools.ec2_tools import (
+    describe_ec2_instances,
+    get_ebs_volumes,
+    get_instance_status,
+    list_ec2_instances,
+)
 from tools.resource_inventory import get_resource_summary, list_resources_by_type
 from tools.security_tools import (
     get_guardduty_findings,
@@ -49,13 +48,14 @@ SYSTEM_PROMPT = """당신은 AWS 인프라 운영 전문 AI 어시스턴트(AIOp
 - 여러 도구를 조합하여 종합적인 분석을 제공하세요.
 
 ## 사용 가능한 도구
-1. **모니터링**: get_cloudwatch_metrics, get_cloudwatch_alarms,
-   query_cloudwatch_logs, describe_ec2_instances
-2. **비용 분석**: get_cost_and_usage, get_cost_forecast,
+1. **모니터링 (AWS CloudWatch MCP)**: Gateway를 통해 제공되는 CloudWatch MCP 도구
+   - 메트릭 조회/분석, 알람 상태/이력, 로그 쿼리/이상 탐지
+2. **EC2 관리**: describe_ec2_instances, list_ec2_instances,
+   get_instance_status, get_ebs_volumes
+3. **비용 분석**: get_cost_and_usage, get_cost_forecast,
    get_rightsizing_recommendations, get_cost_by_service
-3. **보안 점검**: get_security_findings, get_guardduty_findings,
+4. **보안 점검**: get_security_findings, get_guardduty_findings,
    get_iam_credential_report
-4. **EC2 관리**: list_ec2_instances, get_instance_status, get_ebs_volumes
 5. **네트워크**: describe_vpcs, describe_subnets,
    describe_security_groups, describe_route_tables, analyze_network_topology
 6. **인벤토리**: get_resource_summary, list_resources_by_type
@@ -67,13 +67,14 @@ SYSTEM_PROMPT = """당신은 AWS 인프라 운영 전문 AI 어시스턴트(AIOp
 - 보안 이슈는 즉시 주의가 필요한 항목을 우선 보고하세요.
 """
 
-# 도구 목록 — runtime.py 에서 재사용
+# 로컬 도구 목록 — runtime.py 에서 재사용
+# CloudWatch 도구는 AWS 공식 CloudWatch MCP 서버로 대체 (Gateway 경유)
 TOOLS = [
-    # 모니터링
-    get_cloudwatch_metrics,
-    get_cloudwatch_alarms,
-    query_cloudwatch_logs,
+    # EC2
     describe_ec2_instances,
+    list_ec2_instances,
+    get_instance_status,
+    get_ebs_volumes,
     # 비용
     get_cost_and_usage,
     get_cost_forecast,
@@ -83,10 +84,6 @@ TOOLS = [
     get_security_findings,
     get_guardduty_findings,
     get_iam_credential_report,
-    # EC2
-    list_ec2_instances,
-    get_instance_status,
-    get_ebs_volumes,
     # 네트워크
     describe_vpcs,
     describe_subnets,
