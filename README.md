@@ -150,7 +150,7 @@ python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
 | **Cost** | cost_explorer_tools (4) | docs (1) | `configs/cost.yaml` |
 | **Security** | security_tools (3) | cloudtrail, docs (2) | `configs/security.yaml` |
 | **Resource** | ec2 + vpc + inventory (11) | eks, ecs, lambda, network, api, docs (6) | `configs/resource.yaml` |
-| **통합** | 전체 18개 | 전체 10개 | `configs/mcp_servers.yaml` |
+| **통합** | 전체 18개 | 전체 9개 | `configs/mcp_servers.yaml` |
 
 모든 런타임은 `agents/runtime_base.py`의 `create_app()` 팩토리를 공유하며,
 Memory, MCP Manager, Utils 등 공통 모듈을 재사용합니다.
@@ -221,7 +221,7 @@ Cognito JWT 기반 인증을 사용합니다. Gateway 생성 시 자동으로 Co
 외부 MCP 서버를 설정 기반으로 관리합니다.
 MCP 서버 추가 시 설정 파일만 수정하면 되고, 코드 변경은 필요 없습니다.
 
-현재 10개의 AWS 공식 MCP 서버가 설정되어 있습니다:
+현재 9개의 AWS 공식 MCP 서버가 설정되어 있습니다:
 
 ```yaml
 # configs/mcp_servers.yaml (통합 — 일부 발췌)
@@ -315,7 +315,7 @@ python -m pytest tests/test_local.py -v
 | resource_inventory | `get_resource_summary` | 전체 자산 요약 |
 | resource_inventory | `list_resources_by_type` | 유형별 리소스 목록 |
 
-### 외부 MCP 서버 (10개)
+### 외부 MCP 서버 (9개)
 
 설정 기반(`configs/*.yaml`)으로 연결되는 AWS 공식 MCP 서버입니다.
 
@@ -342,3 +342,4 @@ AWS_PROFILE=default          # AWS CLI 프로필
 
 - [Amazon Bedrock AgentCore Samples](https://github.com/awslabs/amazon-bedrock-agentcore-samples)
 - [Strands Agents SDK](https://github.com/strands-agents/strands-agents)
+- [AWS MCP Servers](https://awslabs.github.io/mcp/) — AWS 공식 MCP 서버 목록
