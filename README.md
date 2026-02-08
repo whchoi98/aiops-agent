@@ -28,6 +28,7 @@ aiops_agent/
 │   ├── runtime_base.py       # 공유 팩토리 함수 (create_app)
 │   ├── runtime.py            # 통합 Runtime 엔트리포인트 (하위 호환)
 │   ├── memory.py             # AgentCore Memory 통합
+│   ├── observability.py      # AgentCore Observability (OTEL 설정)
 │   ├── mcp_manager.py        # Multi-MCP Client 관리자
 │   ├── utils.py              # SSM, IAM, 설정 유틸리티
 │   ├── monitoring/           # 모니터링 특화 런타임
@@ -63,6 +64,7 @@ aiops_agent/
 │   └── deploy.sh            # 인프라 배포 스크립트
 ├── scripts/
 │   ├── setup.sh             # 환경 설정
+│   ├── run_with_otel.sh     # Observability 래퍼 (opentelemetry-instrument)
 │   └── cleanup.sh           # 리소스 정리
 ├── tests/
 │   ├── test_tools.py        # 도구 단위 테스트
@@ -118,7 +120,8 @@ python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
                         ┌─────────────────────────────┐
                         │      runtime_base.py        │
                         │  create_app() 공유 팩토리   │
-                        │  (Memory, MCP, Gateway)     │
+                        │  (Memory, Observability,    │
+                        │   MCP, Gateway)             │
                         └──────────┬──────────────────┘
                ┌───────────┬──────┴───────┬────────────┐
                ▼           ▼              ▼            ▼
@@ -181,6 +184,62 @@ mcp_servers:
 3. `runtime.py`에서 `runtime_base.create_app()` 호출
 4. `configs/<domain>.yaml`에 MCP 설정 작성
 5. `python -m agents.<domain>.runtime` 으로 실행
+
+## AgentCore Observability
+
+[E2E 튜토리얼 lab-05](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/01-tutorials/09-AgentCore-E2E) 패턴을 따라
+AWS OpenTelemetry Python Distro로 에이전트의 트레이스/메트릭/로그를 CloudWatch GenAI Observability에 전송합니다.
+
+### 구성 요소
+
+| 컴포넌트 | 설명 |
+|----------|------|
+| `agents/observability.py` | OTEL 환경 변수 설정 + 세션 컨텍스트 관리 |
+| `scripts/run_with_otel.sh` | `opentelemetry-instrument` 래퍼 스크립트 |
+| `aws-opentelemetry-distro` | AWS OTEL Python Distro (자동 계측) |
+
+### 실행 방법
+
+```bash
+# 통합 런타임 (Observability 포함)
+bash scripts/run_with_otel.sh
+
+# 도메인별 런타임
+bash scripts/run_with_otel.sh agents.monitoring.runtime
+bash scripts/run_with_otel.sh agents.cost.runtime
+bash scripts/run_with_otel.sh agents.security.runtime
+bash scripts/run_with_otel.sh agents.resource.runtime
+```
+
+### OTEL 환경 변수
+
+| 변수 | 값 | 설명 |
+|------|-----|------|
+| `OTEL_PYTHON_DISTRO` | `aws_distro` | AWS Distro for OpenTelemetry |
+| `OTEL_PYTHON_CONFIGURATOR` | `aws_configurator` | AWS ADOT 설정자 |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | 내보내기 프로토콜 |
+| `OTEL_TRACES_EXPORTER` | `otlp` | 트레이스 내보내기 |
+| `OTEL_EXPORTER_OTLP_LOGS_HEADERS` | `x-aws-log-group=...` | CloudWatch 로그 그룹 연결 |
+| `OTEL_RESOURCE_ATTRIBUTES` | `service.name=aiops-agent-strands` | 서비스 식별자 |
+| `AGENT_OBSERVABILITY_ENABLED` | `true` | ADOT 파이프라인 활성화 |
+
+### 커스텀 설정
+
+```bash
+# 서비스 이름과 로그 그룹 변경
+OTEL_SERVICE_NAME=my-agent \
+OTEL_LOG_GROUP=agents/my-agent-logs \
+bash scripts/run_with_otel.sh agents.monitoring.runtime
+```
+
+### CloudWatch에서 확인
+
+1. CloudWatch 콘솔 > **GenAI Observability** > **Bedrock AgentCore**
+2. **Sessions** 뷰에서 세션별 트레이스 확인
+3. **Traces** 뷰에서 Bedrock 호출, 도구 실행 등 상세 추적
+
+> **사전 조건**: CloudWatch Transaction Search를 활성화해야 합니다.
+> [활성화 가이드](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html)
 
 ## AgentCore Gateway (MCP)
 
@@ -334,12 +393,20 @@ python -m pytest tests/test_local.py -v
 ## 환경 변수
 
 ```bash
+# 필수
 AWS_REGION=ap-northeast-2   # AWS 리전
 AWS_PROFILE=default          # AWS CLI 프로필
+
+# Observability (scripts/run_with_otel.sh 에서 자동 설정)
+OTEL_SERVICE_NAME=aiops-agent-strands  # 서비스 식별자
+OTEL_LOG_GROUP=agents/aiops-agent-logs # CloudWatch 로그 그룹
+OTEL_LOG_STREAM=default                # CloudWatch 로그 스트림
 ```
 
 ## 참조
 
 - [Amazon Bedrock AgentCore Samples](https://github.com/awslabs/amazon-bedrock-agentcore-samples)
+- [AgentCore Observability 문서](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)
+- [AgentCore Observability 샘플](https://github.com/awslabs/amazon-bedrock-agentcore-samples/tree/main/01-tutorials/06-AgentCore-observability)
 - [Strands Agents SDK](https://github.com/strands-agents/strands-agents)
 - [AWS MCP Servers](https://awslabs.github.io/mcp/) — AWS 공식 MCP 서버 목록

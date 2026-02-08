@@ -67,7 +67,7 @@ Resources:
                   - logs:PutLogEvents
                 Resource:
                   - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
-              # X-Ray
+              # X-Ray (Observability)
               - Effect: Allow
                 Action:
                   - xray:PutTraceSegments
@@ -75,7 +75,7 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: '*'
-              # CloudWatch Metrics
+              # CloudWatch Metrics (Observability)
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
@@ -83,6 +83,19 @@ Resources:
                 Condition:
                   StringEquals:
                     cloudwatch:namespace: bedrock-agentcore
+              # AgentCore Observability — OTEL 로그 그룹
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:agents/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:agents/*:log-stream:*'
               # Bedrock Model Invocation
               - Sid: BedrockModelInvocation
                 Effect: Allow
