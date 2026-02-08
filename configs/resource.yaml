@@ -1,0 +1,8 @@
+# Resource Runtime — MCP 서버 설정
+#
+# 리소스 관리는 로컬 도구만 사용합니다.
+
+gateway:
+  enabled: true
+
+mcp_servers: []

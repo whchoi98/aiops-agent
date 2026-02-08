@@ -1,0 +1,8 @@
+# Cost Runtime — MCP 서버 설정
+#
+# 비용 분석은 로컬 도구만 사용합니다.
+
+gateway:
+  enabled: true
+
+mcp_servers: []
