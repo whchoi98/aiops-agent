@@ -1,8 +1,67 @@
 # Resource Runtime — MCP 서버 설정
 #
-# 리소스 관리는 로컬 도구만 사용합니다.
+# EKS, ECS, Lambda, Network, AWS API, AWS 문서
 
 gateway:
   enabled: true
 
-mcp_servers: []
+mcp_servers:
+  # AWS EKS MCP — Kubernetes 클러스터 관리
+  - name: aws-eks
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.eks-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS ECS MCP — 컨테이너 서비스 관리
+  - name: aws-ecs
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.ecs-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Lambda Tool MCP — Lambda 함수 실행/관리
+  - name: aws-lambda-tool
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.lambda-tool-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Network MCP — VPC/TGW/Cloud WAN/Firewall 트러블슈팅
+  - name: aws-network
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-network-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS API MCP — 범용 AWS API 호출
+  - name: aws-api
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-api-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Documentation MCP — 리소스 관리 가이드 참조
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"

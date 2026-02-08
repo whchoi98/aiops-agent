@@ -1,16 +1,47 @@
 # Monitoring Runtime — MCP 서버 설정
 #
-# CloudWatch MCP 서버를 연결하여 메트릭/알람/로그를 분석합니다.
+# CloudWatch 메트릭/알람/로그, Application Signals, 네트워크 분석
 
 gateway:
   enabled: true
 
 mcp_servers:
+  # AWS CloudWatch MCP — 메트릭/알람/로그/이상탐지
   - name: aws-cloudwatch
     enabled: true
     transport: stdio
     command: uvx
     args:
       - awslabs.cloudwatch-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS CloudWatch Application Signals MCP — 서비스 레벨 헬스/SLO
+  - name: aws-cloudwatch-applicationsignals
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudwatch-applicationsignals-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Network MCP — VPC/TGW/Cloud WAN/Firewall 트러블슈팅
+  - name: aws-network
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-network-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Documentation MCP — 운영 이슈 분석 시 문서 참조
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
     env:
       AWS_REGION: "${AWS_REGION}"

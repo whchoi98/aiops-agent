@@ -1,8 +1,27 @@
 # Security Runtime — MCP 서버 설정
 #
-# 보안 점검은 로컬 도구만 사용합니다.
+# CloudTrail API 감사 + AWS 문서 참조
 
 gateway:
   enabled: true
 
-mcp_servers: []
+mcp_servers:
+  # AWS CloudTrail MCP — API 호출 이력/보안 감사
+  - name: aws-cloudtrail
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudtrail-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Documentation MCP — 보안 가이드 참조
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"

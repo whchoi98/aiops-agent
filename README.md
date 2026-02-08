@@ -9,12 +9,15 @@ AWS 인프라를 지능적으로 모니터링하고 운영하는 AIOps 에이전
 
 ### 핵심 기능
 
-- **CloudWatch 모니터링**: AWS 공식 CloudWatch MCP 서버 연동 (메트릭/알람/로그/이상탐지)
+- **CloudWatch 모니터링**: CloudWatch MCP + Application Signals MCP 연동 (메트릭/알람/로그/SLO)
 - **비용 최적화**: Cost Explorer 기반 비용 분석 및 라이트사이징 권장
-- **보안 점검**: Security Hub, GuardDuty 통합
+- **보안 점검**: Security Hub, GuardDuty, CloudTrail MCP 통합
 - **EC2 관리**: 인스턴스 상태, EBS 볼륨 관리
-- **네트워크 분석**: VPC 토폴로지, 보안 그룹, 라우팅
-- **리소스 인벤토리**: 전체 AWS 자산 요약
+- **컨테이너 관리**: EKS MCP, ECS MCP 연동
+- **Lambda 관리**: Lambda Tool MCP 연동
+- **네트워크 분석**: VPC 로컬 도구 + Network MCP 통합
+- **리소스 인벤토리**: 전체 AWS 자산 요약 + AWS API MCP
+- **문서 참조**: AWS Documentation MCP 통합
 
 ## 프로젝트 구조
 
@@ -51,10 +54,10 @@ aiops_agent/
 │   └── setup_gateway.py     # Gateway 생성/삭제 스크립트
 ├── configs/
 │   ├── mcp_servers.yaml     # 통합 MCP 설정 (전체 MCP 서버)
-│   ├── monitoring.yaml      # 모니터링 MCP 설정 (aws-cloudwatch)
-│   ├── cost.yaml            # 비용 MCP 설정 (빈 mcp_servers)
-│   ├── security.yaml        # 보안 MCP 설정 (빈 mcp_servers)
-│   └── resource.yaml        # 리소스 MCP 설정 (빈 mcp_servers)
+│   ├── monitoring.yaml      # 모니터링 MCP (cloudwatch, app-signals, network, docs)
+│   ├── cost.yaml            # 비용 MCP (docs)
+│   ├── security.yaml        # 보안 MCP (cloudtrail, docs)
+│   └── resource.yaml        # 리소스 MCP (eks, ecs, lambda, network, api, docs)
 ├── prerequisite/
 │   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM)
 │   └── deploy.sh            # 인프라 배포 스크립트
@@ -124,8 +127,14 @@ python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
        │ Runtime  │ │ Runtime  │  │ Runtime  │ │ Runtime  │
        ├──────────┤ ├──────────┤  ├──────────┤ ├──────────┤
        │EC2 (1)   │ │CE (4)    │  │SecHub (1)│ │EC2 (4)   │
-       │+CW MCP   │ │          │  │GD (1)    │ │VPC (5)   │
-       │          │ │          │  │IAM (1)   │ │Inv (2)   │
+       │+CW MCP   │ │+Docs MCP │  │GD (1)    │ │VPC (5)   │
+       │+AppSig   │ │          │  │IAM (1)   │ │Inv (2)   │
+       │+Network  │ │          │  │+Trail MCP│ │+EKS MCP  │
+       │+Docs MCP │ │          │  │+Docs MCP │ │+ECS MCP  │
+       │          │ │          │  │          │ │+Lambda   │
+       │          │ │          │  │          │ │+Network  │
+       │          │ │          │  │          │ │+API MCP  │
+       │          │ │          │  │          │ │+Docs MCP │
        └──────────┘ └──────────┘  └──────────┘ └──────────┘
                ┌───────────┴──────────────┘
                ▼
@@ -135,13 +144,13 @@ python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
        └──────────────┘
 ```
 
-| 런타임 | 모듈 경로 | 로컬 도구 | MCP 서버 | MCP 설정 |
-|--------|-----------|-----------|----------|----------|
-| **Monitoring** | `agents/monitoring/` | describe_ec2_instances (1) | aws-cloudwatch (stdio) | `configs/monitoring.yaml` |
-| **Cost** | `agents/cost/` | cost_explorer_tools 4개 | 없음 | `configs/cost.yaml` |
-| **Security** | `agents/security/` | security_tools 3개 | 없음 | `configs/security.yaml` |
-| **Resource** | `agents/resource/` | ec2 4 + vpc 5 + inventory 2 (11) | 없음 | `configs/resource.yaml` |
-| **통합** | `agents/runtime.py` | 전체 18개 | aws-cloudwatch | `configs/mcp_servers.yaml` |
+| 런타임 | 로컬 도구 | MCP 서버 | MCP 설정 |
+|--------|-----------|----------|----------|
+| **Monitoring** | describe_ec2_instances (1) | cloudwatch, app-signals, network, docs (4) | `configs/monitoring.yaml` |
+| **Cost** | cost_explorer_tools (4) | docs (1) | `configs/cost.yaml` |
+| **Security** | security_tools (3) | cloudtrail, docs (2) | `configs/security.yaml` |
+| **Resource** | ec2 + vpc + inventory (11) | eks, ecs, lambda, network, api, docs (6) | `configs/resource.yaml` |
+| **통합** | 전체 18개 | 전체 10개 | `configs/mcp_servers.yaml` |
 
 모든 런타임은 `agents/runtime_base.py`의 `create_app()` 팩토리를 공유하며,
 Memory, MCP Manager, Utils 등 공통 모듈을 재사용합니다.
@@ -208,19 +217,24 @@ Cognito JWT 기반 인증을 사용합니다. Gateway 생성 시 자동으로 Co
 
 ## 외부 MCP 서버 연동
 
-`configs/mcp_servers.yaml` 에서 외부 MCP 서버를 설정 기반으로 관리합니다.
+`configs/mcp_servers.yaml` (통합) 또는 `configs/<domain>.yaml` (도메인별)에서
+외부 MCP 서버를 설정 기반으로 관리합니다.
 MCP 서버 추가 시 설정 파일만 수정하면 되고, 코드 변경은 필요 없습니다.
 
+현재 10개의 AWS 공식 MCP 서버가 설정되어 있습니다:
+
 ```yaml
-# configs/mcp_servers.yaml
+# configs/mcp_servers.yaml (통합 — 일부 발췌)
 mcp_servers:
-  - name: aws-cloudwatch
-    enabled: true
-    transport: stdio
-    command: uvx
-    args: [awslabs.cloudwatch-mcp-server@latest]
-    env:
-      AWS_REGION: "${AWS_REGION}"
+  - name: aws-cloudwatch                    # 메트릭/알람/로그
+  - name: aws-cloudwatch-applicationsignals # 서비스 SLO
+  - name: aws-network                       # 네트워크 트러블슈팅
+  - name: aws-cloudtrail                    # API 감사 로그
+  - name: aws-eks                           # Kubernetes
+  - name: aws-ecs                           # 컨테이너
+  - name: aws-lambda-tool                   # Lambda 실행
+  - name: aws-api                           # 범용 AWS API
+  - name: aws-documentation                 # AWS 문서 검색
 ```
 
 ### 지원 transport
@@ -301,21 +315,21 @@ python -m pytest tests/test_local.py -v
 | resource_inventory | `get_resource_summary` | 전체 자산 요약 |
 | resource_inventory | `list_resources_by_type` | 유형별 리소스 목록 |
 
-### AWS CloudWatch MCP (외부)
+### 외부 MCP 서버 (10개)
 
-CloudWatch 모니터링은 AWS 공식 CloudWatch MCP 서버로 대체되었습니다.
-Gateway 또는 MCP 클라이언트를 통해 다음 도구에 접근할 수 있습니다.
+설정 기반(`configs/*.yaml`)으로 연결되는 AWS 공식 MCP 서버입니다.
 
-| MCP 도구 | 설명 |
-|----------|------|
-| `get_metric_data` | 메트릭 데이터 조회 (고급 필터링/페이지네이션) |
-| `analyze_metric` | 메트릭 트렌드/계절성 분석 |
-| `get_active_alarms` | 활성 알람 조회 |
-| `get_alarm_history` | 알람 상태 이력 |
-| `get_recommended_metric_alarms` | 알람 임계값 추천 |
-| `execute_log_insights_query` | Logs Insights 쿼리 |
-| `analyze_log_group` | 로그 이상 탐지/패턴 분석 |
-| `describe_log_groups` | 로그 그룹 목록 |
+| MCP 서버 | 패키지 | 도메인 | 설명 |
+|----------|--------|--------|------|
+| aws-cloudwatch | `awslabs.cloudwatch-mcp-server` | Monitoring | 메트릭/알람/로그/이상탐지 |
+| aws-cloudwatch-applicationsignals | `awslabs.cloudwatch-applicationsignals-mcp-server` | Monitoring | 서비스 레벨 헬스/SLO |
+| aws-network | `awslabs.aws-network-mcp-server` | Monitoring, Resource | VPC/TGW/Cloud WAN/Firewall 트러블슈팅 |
+| aws-cloudtrail | `awslabs.cloudtrail-mcp-server` | Security | API 호출 이력/보안 감사 |
+| aws-eks | `awslabs.eks-mcp-server` | Resource | Kubernetes 클러스터 관리 |
+| aws-ecs | `awslabs.ecs-mcp-server` | Resource | 컨테이너 서비스 관리 |
+| aws-lambda-tool | `awslabs.lambda-tool-mcp-server` | Resource | Lambda 함수 실행/관리 |
+| aws-api | `awslabs.aws-api-mcp-server` | Resource | 범용 AWS API 호출 |
+| aws-documentation | `awslabs.aws-documentation-mcp-server` | 전체 (공유) | AWS 공식 문서 검색/조회 |
 
 ## 환경 변수
 

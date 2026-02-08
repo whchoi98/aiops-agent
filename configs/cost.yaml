@@ -1,8 +1,17 @@
 # Cost Runtime — MCP 서버 설정
 #
-# 비용 분석은 로컬 도구만 사용합니다.
+# 비용 분석 + AWS 문서 참조
 
 gateway:
   enabled: true
 
-mcp_servers: []
+mcp_servers:
+  # AWS Documentation MCP — 비용 최적화 가이드 참조
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"

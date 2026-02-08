@@ -1,4 +1,4 @@
-# AIOps Agent — MCP 서버 설정
+# AIOps Agent — 통합 MCP 서버 설정
 #
 # 에이전트가 소비할 외부 MCP 서버를 정의합니다.
 # 새 MCP 서버 추가 시 mcp_servers 리스트에 항목을 추가하세요.
@@ -18,6 +18,8 @@ gateway:
 # 외부 MCP 서버 (에이전트가 소비)
 # ------------------------------------------------------------------
 mcp_servers:
+  # ── 모니터링 ─────────────────────────────────────────────────
+
   # AWS CloudWatch MCP — 메트릭/알람/로그/이상탐지
   - name: aws-cloudwatch
     enabled: true
@@ -28,20 +30,88 @@ mcp_servers:
     env:
       AWS_REGION: "${AWS_REGION}"
 
-  # 향후 추가 예시:
-  #
-  # - name: aws-cost-explorer
-  #   enabled: false
-  #   transport: stdio
-  #   command: uvx
-  #   args:
-  #     - awslabs.cost-explorer-mcp-server@latest
-  #   env:
-  #     AWS_REGION: "${AWS_REGION}"
-  #
-  # - name: custom-http-mcp
-  #   enabled: false
-  #   transport: streamable_http
-  #   url: https://mcp.example.com/sse
-  #   headers:
-  #     Authorization: "Bearer ${MCP_TOKEN}"
+  # AWS CloudWatch Application Signals MCP — 서비스 레벨 헬스/SLO
+  - name: aws-cloudwatch-applicationsignals
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudwatch-applicationsignals-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Network MCP — VPC/TGW/Cloud WAN/Firewall 트러블슈팅
+  - name: aws-network
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-network-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # ── 보안 ─────────────────────────────────────────────────────
+
+  # AWS CloudTrail MCP — API 호출 이력/보안 감사
+  - name: aws-cloudtrail
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudtrail-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # ── 리소스 관리 ──────────────────────────────────────────────
+
+  # AWS EKS MCP — Kubernetes 클러스터 관리
+  - name: aws-eks
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.eks-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS ECS MCP — 컨테이너 서비스 관리
+  - name: aws-ecs
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.ecs-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Lambda Tool MCP — Lambda 함수 실행/관리
+  - name: aws-lambda-tool
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.lambda-tool-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS API MCP — 범용 AWS API 호출
+  - name: aws-api
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-api-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # ── 공유 (문서/지식) ─────────────────────────────────────────
+
+  # AWS Documentation MCP — AWS 공식 문서 검색/조회
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
