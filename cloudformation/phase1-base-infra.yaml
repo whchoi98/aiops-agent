@@ -1,0 +1,878 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Phase 1 - Base Infra: VPC + CloudFront + ALB + EC2 (VSCode/Streamlit). Exports for Phase 2 cross-stack references.'
+
+Metadata:
+  "AWS::CloudFormation::Interface":
+    ParameterGroups:
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+         - AvailabilityZoneA
+         - AvailabilityZoneB
+         - VPCCIDRBlock
+         - PublicSubnetABlock
+         - PublicSubnetBBlock
+         - PrivateSubnetABlock
+         - PrivateSubnetBBlock
+      - Label:
+          default: "VSCode Configuration"
+        Parameters:
+         - InstanceType
+         - VSCodePassword
+
+Parameters:
+  CloudFrontPrefixListId:
+    Type: String
+    Description: CloudFront origin-facing managed prefix list ID
+  AvailabilityZoneA:
+    Description: "Choose AZ1 for your VPC"
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: ap-northeast-2a
+    
+  AvailabilityZoneB:
+    Description: "Choose AZ2 for your VPC"
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: ap-northeast-2b
+
+  VPCCIDRBlock:
+    Type: String
+    Default: "10.254.0.0/16"
+    Description: "CIDR range for the VPC"
+
+  PublicSubnetABlock:
+    Type: String
+    Default: "10.254.11.0/24"
+    Description: "CIDR for public subnet A"
+
+  PublicSubnetBBlock:
+    Type: String
+    Default: "10.254.12.0/24"
+    Description: "CIDR for public subnet B"
+
+  PrivateSubnetABlock:
+    Type: String
+    Default: "10.254.21.0/24"
+    Description: "CIDR for private subnet A"
+
+  PrivateSubnetBBlock:
+    Type: String
+    Default: "10.254.22.0/24"
+    Description: "CIDR for private subnet B"
+
+  InstanceType:
+    Type: String
+    Default: m7i.2xlarge
+    Description: "EC2 Instance Type for VSCode Server"
+    AllowedValues:
+      - t4g.xlarge
+      - t4g.2xlarge
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+      - m7g.xlarge
+      - m7g.2xlarge
+      - m7i.xlarge
+      - m7i.2xlarge
+
+  VSCodePassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: "Password for VSCode Server (minimum 8 characters)"
+
+  AmazonLinux2023AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+
+Resources:
+  # VPC Configuration
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VPCCIDRBlock
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VPC'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-IGW'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # NAT Gateway
+  NatGatewayEIP:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-NATGW-EIP'
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-NATGW'
+
+  # Public Subnets
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetABlock
+      AvailabilityZone: !Ref AvailabilityZoneA
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PublicSubnetA'
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetBBlock
+      AvailabilityZone: !Ref AvailabilityZoneB
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PublicSubnetB'
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PublicRT'
+
+  PublicRoute:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private Subnets
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetABlock
+      AvailabilityZone: !Ref AvailabilityZoneA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PrivateSubnetA'
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetBBlock
+      AvailabilityZone: !Ref AvailabilityZoneB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PrivateSubnetB'
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PrivateRT-A'
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-PrivateRT-B'
+
+  PrivateRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  PrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  # Security Groups
+  PublicALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for Internet-facing ALB - HTTP from CloudFront origin-facing only"
+      GroupName: !Sub '${AWS::StackName}-Public-ALB-SG'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontPrefixListId
+          Description: "HTTP from CloudFront origin-facing only"
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Public-ALB-SG'
+
+  VSCodeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for VSCode Server"
+      GroupName: !Sub '${AWS::StackName}-VSCode-SG'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8888
+          ToPort: 8888
+          SourceSecurityGroupId: !Ref PublicALBSecurityGroup
+          Description: "VSCode port from Public ALB only"
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          SourceSecurityGroupId: !Ref PublicALBSecurityGroup
+          Description: "Streamlit port from Public ALB only"
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VSCode-SG'
+
+  SSMSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for SSM endpoints"
+      GroupName: !Sub '${AWS::StackName}-SSM-SG'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VPCCIDRBlock
+          Description: "HTTPS from VPC"
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-SSM-SG'
+
+  # VPC Endpoints for SSM
+  SSMEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssm"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref SSMSecurityGroup
+
+  SSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssmmessages"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref SSMSecurityGroup
+
+  EC2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2messages"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+      SecurityGroupIds:
+        - !Ref SSMSecurityGroup
+
+  # IAM Role for EC2
+  VSCodeServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-VSCode-Role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VSCode-Role'
+
+  VSCodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref VSCodeServerRole
+
+  # VSCode Server EC2 Instance
+  VSCodeServer:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - SSMEndpoint
+      - SSMMessagesEndpoint
+      - EC2MessagesEndpoint
+    Properties:
+      InstanceType: !Ref InstanceType
+      PrivateIpAddress: 10.254.21.101
+      ImageId: !Ref AmazonLinux2023AmiId
+      IamInstanceProfile: !Ref VSCodeInstanceProfile
+      SubnetId: !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VSCodeSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 100
+            VolumeType: gp3
+            Encrypted: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          
+          # Log all output
+          exec > >(tee /var/log/user-data.log) 2>&1
+          
+          echo "Starting user-data script at $(date)"
+          
+          # System update with conflict resolution
+          dnf update -y --allowerasing
+          
+          # Install required packages with conflict resolution
+          dnf install -y --allowerasing curl jq tar gzip python3
+
+          # Install pip3 and Python packages
+          dnf install -y python3-pip
+          pip3 install boto3 click bedrock-agentcore
+
+          # Install development tools
+          dnf groupinstall -y "Development Tools" || echo "[WARN] Development Tools install failed"
+          
+          # Install Node.js 20
+          wget -qO- https://rpm.nodesource.com/setup_20.x | bash - || echo "[WARN] NodeSource setup failed"
+          dnf install -y nodejs
+          
+          # Install AWS CLI v2
+          wget "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -O "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+          rm -rf aws awscliv2.zip
+          
+          # Install SSM Plugin
+          dnf install -y https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+
+          # Install Docker
+          dnf install -y docker
+          systemctl enable docker
+          systemctl start docker
+          usermod -aG docker ec2-user
+          echo "Docker installed: $(docker --version)" >> /var/log/user-data.log
+
+          # Install uv package manager
+          wget -qO- https://astral.sh/uv/install.sh | sh
+          
+          # Install code-server v4.106.3
+          cd /tmp
+          if wget https://github.com/coder/code-server/releases/download/v4.106.3/code-server-4.106.3-linux-amd64.tar.gz; then
+            tar -xzf code-server-4.106.3-linux-amd64.tar.gz
+            mv code-server-4.106.3-linux-amd64 /usr/local/lib/code-server
+            ln -sf /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server
+            rm code-server-4.106.3-linux-amd64.tar.gz
+            echo "code-server installed successfully"
+          else
+            echo "ERROR: code-server download failed"
+            exit 1
+          fi
+          
+          # Configure code-server
+          mkdir -p /home/ec2-user/.config/code-server
+          cat > /home/ec2-user/.config/code-server/config.yaml <<EOF
+          bind-addr: 0.0.0.0:8888
+          auth: password
+          password: "${VSCodePassword}"
+          cert: false
+          EOF
+          
+          chown -R ec2-user:ec2-user /home/ec2-user/.config
+          
+          # Create systemd service
+          cat > /etc/systemd/system/code-server.service <<EOF
+          [Unit]
+          Description=code-server
+          After=network.target
+          
+          [Service]
+          Type=simple
+          User=ec2-user
+          WorkingDirectory=/home/ec2-user
+          Environment="PASSWORD=${VSCodePassword}"
+          ExecStart=/usr/local/bin/code-server --config /home/ec2-user/.config/code-server/config.yaml
+          Restart=always
+          RestartSec=10
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          # Enable and start service
+          systemctl daemon-reload
+          systemctl enable code-server
+          systemctl start code-server
+          
+          # Install CloudWatch agent
+          wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
+          rpm -U ./amazon-cloudwatch-agent.rpm
+          rm amazon-cloudwatch-agent.rpm
+          
+          # Install kiro-cli
+          cd /home/ec2-user
+          if curl --proto '=https' --tlsv1.2 -sSf \
+            'https://desktop-release.q.us-east-1.amazonaws.com/latest/kirocli-x86_64-linux.zip' \
+            -o 'kirocli.zip'; then
+            unzip -q kirocli.zip
+            if [ -d "kirocli/bin" ]; then
+              chmod +x kirocli/bin/*
+              cp kirocli/bin/* /usr/local/bin/
+              rm -rf kirocli kirocli.zip
+              echo "kiro-cli installed successfully"
+              
+              # Test kiro-cli execution
+              sudo -u ec2-user /usr/local/bin/kiro-cli --version || echo "kiro-cli version check failed"
+            else
+              echo "WARNING: kirocli/bin directory not found"
+              ls -la
+            fi
+          else
+            echo "WARNING: kiro-cli download failed"
+          fi
+          
+          # Install Claude Code via npm
+          npm install -g @anthropic-ai/claude-code
+          
+          # Install Claude Code extension
+          sudo -u ec2-user /usr/local/bin/code-server --install-extension anthropic.claude-code
+          
+          # ── Streamlit Dashboard 설치 ──
+          pip3 install streamlit plotly pandas
+
+          # Streamlit 설정
+          mkdir -p /home/ec2-user/.streamlit
+          cat > /home/ec2-user/.streamlit/config.toml <<STEOF
+          [server]
+          port = 8501
+          address = "0.0.0.0"
+          baseUrlPath = "/streamlit"
+          enableCORS = false
+          enableXsrfProtection = false
+
+          [browser]
+          gatherUsageStats = false
+          STEOF
+          chown -R ec2-user:ec2-user /home/ec2-user/.streamlit
+
+          # Streamlit systemd 서비스
+          cat > /etc/systemd/system/streamlit.service <<STEOF
+          [Unit]
+          Description=Streamlit AIOps Dashboard
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=ec2-user
+          WorkingDirectory=/home/ec2-user/aiops_agent
+          Environment="PATH=/usr/local/bin:/usr/bin:/bin:/home/ec2-user/.local/bin"
+          ExecStart=/usr/local/bin/streamlit run dashboard/app.py --server.baseUrlPath=/streamlit
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+          STEOF
+
+          systemctl daemon-reload
+          systemctl enable streamlit
+          # Note: streamlit 서비스는 aiops_agent 클론 후 수동 시작
+
+          # Signal completion
+          echo "VSCode Server + Streamlit installation completed at $(date)" | tee -a /var/log/user-data.log
+          echo "VSCode Server + Streamlit installation completed" > /var/log/vscode-setup.log
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VSCode-Server'
+
+  # Internet-facing Application Load Balancer
+  PublicALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "${AWS::StackName}-Public-ALB"
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: 3600
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      SecurityGroups:
+        - !Ref PublicALBSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Public-ALB'
+
+  PublicALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: VSCodeServer
+    Properties:
+      Name: !Sub "${AWS::StackName}-Public-TG"
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 8888
+      TargetType: instance
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: "/"
+      HealthCheckPort: 8888
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: 200,302
+      Targets:
+        - Id: !Ref VSCodeServer
+          Port: 8888
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+        - Key: stickiness.enabled
+          Value: true
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: 86400
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Public-TG'
+
+  PublicALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref PublicALB
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: 403
+            ContentType: text/plain
+            MessageBody: Access Denied
+
+  # Streamlit Target Group
+  StreamlitTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: VSCodeServer
+    Properties:
+      Name: !Sub "${AWS::StackName}-Streamlit-TG"
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 8501
+      TargetType: instance
+      HealthCheckPath: "/streamlit/_stcore/health"
+      HealthCheckPort: "8501"
+      Matcher:
+        HttpCode: "200"
+      Targets:
+        - Id: !Ref VSCodeServer
+          Port: 8501
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: "true"
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: "86400"
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Streamlit-TG'
+
+  # Streamlit ALB Listener Rule (Priority 1 — matched before VSCode)
+  StreamlitALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref PublicALBListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/streamlit*"
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Custom-Secret
+            Values:
+              - !Sub '${AWS::StackName}-secret-${AWS::AccountId}'
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref StreamlitTargetGroup
+
+  # VSCode ALB Listener Rule (Priority 2 — default catch-all)
+  PublicALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref PublicALBListener
+      Priority: 2
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: X-Custom-Secret
+            Values:
+              - !Sub '${AWS::StackName}-secret-${AWS::AccountId}'
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref PublicALBTargetGroup
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "VSCode Server distribution for ${AWS::StackName}"
+        Origins:
+          - Id: PublicALBOrigin
+            DomainName: !GetAtt PublicALB.DNSName
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 5
+            OriginCustomHeaders:
+              - HeaderName: X-Custom-Secret
+                HeaderValue: !Sub '${AWS::StackName}-secret-${AWS::AccountId}'
+        CacheBehaviors:
+          - PathPattern: "/streamlit*"
+            TargetOriginId: PublicALBOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - POST
+              - PATCH
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+            ForwardedValues:
+              QueryString: true
+              Cookies:
+                Forward: all
+              Headers:
+                - '*'
+            MinTTL: 0
+            DefaultTTL: 0
+            MaxTTL: 0
+        DefaultCacheBehavior:
+          TargetOriginId: PublicALBOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: all
+            Headers:
+              - '*'
+          MinTTL: 0
+          DefaultTTL: 0
+          MaxTTL: 0
+        PriceClass: PriceClass_All
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-CloudFront'
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub "${AWS::StackName}-VPC-ID"
+
+  CloudFrontURL:
+    Description: CloudFront Distribution URL (Use this to access VSCode)
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFront-URL"
+
+  PublicALBEndpoint:
+    Description: Public ALB DNS Name (Direct access will be denied - use CloudFront URL)
+    Value: !Sub "http://${PublicALB.DNSName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-Public-ALB-DNS"
+
+  VSCodeServerInstanceId:
+    Description: VSCode Server EC2 Instance ID
+    Value: !Ref VSCodeServer
+    Export:
+      Name: !Sub "${AWS::StackName}-Instance-ID"
+
+  VSCodeServerPrivateIP:
+    Description: VSCode Server Private IP
+    Value: !GetAtt VSCodeServer.PrivateIp
+    Export:
+      Name: !Sub "${AWS::StackName}-Private-IP"
+
+  PublicSubnetACIDR:
+    Description: Public Subnet A CIDR (configured via parameter)
+    Value: !Ref PublicSubnetABlock
+
+  CustomHeaderSecret:
+    Description: Custom header secret used for CloudFront validation
+    Value: !Sub '${AWS::StackName}-secret-${AWS::AccountId}'
+
+  StreamlitURL:
+    Description: Streamlit Dashboard URL
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}/streamlit"
+
+  AccessInstructions:
+    Description: How to access VSCode Server and Streamlit Dashboard
+    Value: !Sub |
+      1. VSCode Access: https://${CloudFrontDistribution.DomainName}
+      2. Streamlit Dashboard: https://${CloudFrontDistribution.DomainName}/streamlit
+      3. Direct ALB Access: BLOCKED (403 Forbidden - requires CloudFront Prefix List + Custom Header)
+      4. Direct EC2 (SSM): aws ssm start-session --target ${VSCodeServer}
+      5. Password: Use the password provided during stack creation
+
+      Security: ALB only accepts requests from CloudFront origin-facing only
+      Custom Header Protection: Requests without X-Custom-Secret header are blocked with 403 Forbidden
+
+  Architecture:
+    Description: Network Architecture
+    Value: "CloudFront (HTTPS) -> Internet-facing ALB (HTTP:80 + Custom Header) -> EC2 (VSCode:8888 + Streamlit:8501)"
+
+  # --- Cross-stack Exports for Phase 2 ---
+
+  PrivateSubnetAId:
+    Description: Private Subnet A ID
+    Value: !Ref PrivateSubnetA
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetA-ID"
+
+  PrivateSubnetBId:
+    Description: Private Subnet B ID
+    Value: !Ref PrivateSubnetB
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetB-ID"
+
+  PublicSubnetAId:
+    Description: Public Subnet A ID
+    Value: !Ref PublicSubnetA
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetA-ID"
+
+  PublicSubnetBId:
+    Description: Public Subnet B ID
+    Value: !Ref PublicSubnetB
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetB-ID"
+
+  VPCCidr:
+    Description: VPC CIDR Block
+    Value: !Ref VPCCIDRBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-VPC-CIDR"
+
+  VSCodeRoleName:
+    Description: VSCode EC2 IAM Role Name (for Phase 2 policy attachment)
+    Value: !Ref VSCodeServerRole
+    Export:
+      Name: !Sub "${AWS::StackName}-VSCode-Role-Name"
+
+  VSCodeSecurityGroupId:
+    Description: VSCode Security Group ID
+    Value: !Ref VSCodeSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-VSCode-SG-ID"
+
+  SSMSecurityGroupId:
+    Description: SSM Endpoint Security Group ID
+    Value: !Ref SSMSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SSM-SG-ID"

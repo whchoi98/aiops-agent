@@ -1,0 +1,422 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Phase 2 - AgentCore Prerequisites: IAM Roles, Lambda, SSM Parameters + EC2 policy attachment to Phase 1'
+
+Parameters:
+  Phase1StackName:
+    Type: String
+    Default: aiops-phase1
+    Description: Phase 1 base infra stack name (for cross-stack references)
+
+  LambdaS3Bucket:
+    Type: String
+    Description: 'S3 bucket containing the Lambda deployment package'
+
+  LambdaS3Key:
+    Type: String
+    Default: 'aiops-gateway/lambda.zip'
+    Description: 'S3 key for the Lambda deployment package'
+
+Resources:
+
+  # -----------------------------------------------------------------------
+  # Phase 1 EC2 에 Bedrock/AgentCore/AIOps 권한 추가
+  # -----------------------------------------------------------------------
+  AgentCoreEC2Policy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: AIOpsAgentCoreEC2Policy
+      Roles:
+        - Fn::ImportValue: !Sub '${Phase1StackName}-VSCode-Role-Name'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Bedrock Model Invocation
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+              - bedrock:ApplyGuardrail
+            Resource:
+              - 'arn:aws:bedrock:*::foundation-model/*'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+          # AgentCore (Memory, Gateway, Identity)
+          - Effect: Allow
+            Action:
+              - bedrock-agentcore:*
+            Resource:
+              - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+          # SSM Parameter Access
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:PutParameter
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/aiops/*'
+          # AIOps Read-Only (CloudWatch, EC2, Cost, Security 등)
+          - Effect: Allow
+            Action:
+              - cloudwatch:GetMetricStatistics
+              - cloudwatch:DescribeAlarms
+              - cloudwatch:ListMetrics
+              - logs:StartQuery
+              - logs:GetQueryResults
+              - logs:DescribeLogGroups
+              - ec2:DescribeInstances
+              - ec2:DescribeInstanceStatus
+              - ec2:DescribeVolumes
+              - ec2:DescribeVpcs
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeRouteTables
+              - ec2:DescribeNetworkAcls
+              - ce:GetCostAndUsage
+              - ce:GetCostForecast
+              - ce:GetRightsizingRecommendation
+              - securityhub:GetFindings
+              - guardduty:ListDetectors
+              - guardduty:ListFindings
+              - guardduty:GetFindings
+              - iam:GenerateCredentialReport
+              - iam:GetCredentialReport
+              - iam:ListUsers
+              - iam:ListRoles
+              - s3:ListAllMyBuckets
+              - lambda:ListFunctions
+              - rds:DescribeDBInstances
+            Resource: '*'
+
+  # -----------------------------------------------------------------------
+  # Runtime AgentCore Role — bedrock-agentcore 서비스가 assume
+  # -----------------------------------------------------------------------
+  RuntimeAgentCoreRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AIOpsBedrockAgentCoreRole-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock-agentcore.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: AIOpsAgentCorePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # ECR Image Access
+              - Sid: ECRImageAccess
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !Sub 'arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/bedrock_agentcore-aiops*'
+              # ECR Token
+              - Sid: ECRTokenAccess
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogStreams
+                  - logs:CreateLogGroup
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*'
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
+              # X-Ray (Observability)
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: '*'
+              # CloudWatch Metrics (Observability)
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: bedrock-agentcore
+              # AgentCore Observability — OTEL 로그 그룹
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:agents/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:agents/*:log-stream:*'
+              # Bedrock Model Invocation
+              - Sid: BedrockModelInvocation
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:ApplyGuardrail
+                  - bedrock:Retrieve
+                Resource:
+                  - 'arn:aws:bedrock:*::foundation-model/*'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:*'
+              # AgentCore Identity
+              - Sid: GetAgentAccessToken
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetWorkloadAccessToken
+                  - bedrock-agentcore:GetWorkloadAccessTokenForJWT
+                  - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/aiops*'
+              # AgentCore Memory
+              - Sid: AllowAgentToUseMemory
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:CreateEvent
+                  - bedrock-agentcore:ListEvents
+                  - bedrock-agentcore:GetMemoryRecord
+                  - bedrock-agentcore:GetMemory
+                  - bedrock-agentcore:RetrieveMemoryRecords
+                  - bedrock-agentcore:ListMemoryRecords
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+              # AgentCore Gateway
+              - Sid: GatewayAccess
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetGateway
+                  - bedrock-agentcore:InvokeGateway
+                Resource:
+                  - !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:gateway/*'
+              # SSM Parameter Store
+              - Sid: SSMParameterAccess
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/aiops/*'
+              # AIOps Read-Only Access
+              - Sid: AIOpsReadOnlyAccess
+                Effect: Allow
+                Action:
+                  # CloudWatch
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  # EC2
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  # Cost Explorer
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - ce:GetRightsizingRecommendation
+                  # Security Hub & GuardDuty
+                  - securityhub:GetFindings
+                  - guardduty:ListDetectors
+                  - guardduty:ListFindings
+                  - guardduty:GetFindings
+                  # IAM (read-only)
+                  - iam:GenerateCredentialReport
+                  - iam:GetCredentialReport
+                  - iam:ListUsers
+                  - iam:ListRoles
+                  # Other services
+                  - s3:ListAllMyBuckets
+                  - lambda:ListFunctions
+                  - rds:DescribeDBInstances
+                Resource: '*'
+
+  # -----------------------------------------------------------------------
+  # Gateway AgentCore Role — bedrock-agentcore.amazonaws.com 가 Lambda 를 호출
+  # -----------------------------------------------------------------------
+  GatewayAgentCoreRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AIOpsGatewayAgentCoreRole-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - bedrock-agentcore.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      Policies:
+        - PolicyName: AIOpsGatewayInvokeLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt AIOpsGatewayLambda.Arn
+
+  # -----------------------------------------------------------------------
+  # Lambda 실행 역할 — AIOps 읽기 전용 권한
+  # -----------------------------------------------------------------------
+  AIOpsGatewayLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AIOpsGatewayLambdaRole-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AIOpsLambdaReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AIOpsReadOnlyAccess
+                Effect: Allow
+                Action:
+                  # CloudWatch
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:ListMetrics
+                  - logs:StartQuery
+                  - logs:GetQueryResults
+                  - logs:DescribeLogGroups
+                  # EC2
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  # Cost Explorer
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - ce:GetRightsizingRecommendation
+                  # Security Hub & GuardDuty
+                  - securityhub:GetFindings
+                  - guardduty:ListDetectors
+                  - guardduty:ListFindings
+                  - guardduty:GetFindings
+                  # IAM (read-only)
+                  - iam:GenerateCredentialReport
+                  - iam:GetCredentialReport
+                  - iam:ListUsers
+                  - iam:ListRoles
+                  # Other services
+                  - s3:ListAllMyBuckets
+                  - lambda:ListFunctions
+                  - rds:DescribeDBInstances
+                Resource: '*'
+
+  # -----------------------------------------------------------------------
+  # Lambda 함수 — Gateway 도구 디스패처
+  # -----------------------------------------------------------------------
+  AIOpsGatewayLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'aiops-gateway-tools-${AWS::Region}'
+      Runtime: python3.11
+      Handler: gateway/lambda_handler.lambda_handler
+      Role: !GetAtt AIOpsGatewayLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          AWS_REGION_OVERRIDE: !Ref AWS::Region
+          LOG_LEVEL: INFO
+
+  # SSM Parameters
+  RuntimeRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/agentcore/runtime_execution_role_arn'
+      Type: String
+      Value: !GetAtt RuntimeAgentCoreRole.Arn
+      Description: 'AIOps AgentCore Runtime Execution Role ARN'
+
+  GatewayRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/agentcore/gateway_role_arn'
+      Type: String
+      Value: !GetAtt GatewayAgentCoreRole.Arn
+      Description: 'AIOps Gateway AgentCore Role ARN'
+
+  GatewayLambdaArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/agentcore/gateway_lambda_arn'
+      Type: String
+      Value: !GetAtt AIOpsGatewayLambda.Arn
+      Description: 'AIOps Gateway Lambda Function ARN'
+
+Outputs:
+  RuntimeRoleArn:
+    Description: 'AgentCore Runtime Role ARN'
+    Value: !GetAtt RuntimeAgentCoreRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RuntimeRoleArn'
+
+  GatewayRoleArn:
+    Description: 'Gateway AgentCore Role ARN'
+    Value: !GetAtt GatewayAgentCoreRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GatewayRoleArn'
+
+  GatewayLambdaArn:
+    Description: 'Gateway Lambda Function ARN'
+    Value: !GetAtt AIOpsGatewayLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-GatewayLambdaArn'
+
+  AgentCoreEC2PolicyId:
+    Description: 'IAM Policy attached to Phase 1 EC2 Role'
+    Value: !Ref AgentCoreEC2Policy

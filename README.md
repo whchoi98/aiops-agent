@@ -69,9 +69,14 @@ aiops_agent/
 │   ├── resource.yaml        # 리소스 MCP (eks, ecs, lambda, network, api, docs)
 │   ├── inventory.yaml       # 인벤토리 MCP (docs)
 │   └── super.yaml           # Super Agent MCP (전체 9개 MCP 서버)
+├── cloudformation/
+│   ├── phase1-base-infra.yaml       # Phase 1: VPC + CloudFront + ALB + EC2
+│   ├── phase2-agentcore-prereq.yaml # Phase 2: AgentCore IAM + Lambda + EC2 정책
+│   ├── deploy.sh                    # 통합 배포 스크립트 (phase1/phase2/all/status)
+│   └── vscode_streamlit_server.yaml # 단일 스택 (레거시)
 ├── prerequisite/
-│   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM)
-│   └── deploy.sh            # 인프라 배포 스크립트
+│   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM) — 단독 배포용
+│   └── deploy.sh            # 인프라 배포 스크립트 — 단독 배포용
 ├── scripts/
 │   ├── setup.sh             # 환경 설정
 │   ├── run_with_otel.sh     # Observability 래퍼 (opentelemetry-instrument)
@@ -149,7 +154,48 @@ steampipe query "SELECT COUNT(*) FROM kubernetes_pod"
 
 ### Step 5. 인프라 배포 (CloudFormation)
 
-AgentCore Runtime에 필요한 IAM Role, Lambda 함수, SSM 파라미터를 배포합니다.
+#### 옵션 A: 단계별 배포 (권장)
+
+Phase 1(VPC+EC2)과 Phase 2(AgentCore)를 분리하여 독립적으로 배포합니다.
+
+```bash
+# Phase 1: VPC + CloudFront + ALB + EC2 (VSCode/Streamlit)
+bash cloudformation/deploy.sh phase1
+
+# Phase 2: AgentCore IAM + Lambda + EC2 권한 확장 (Phase 1 필수)
+bash cloudformation/deploy.sh phase2
+
+# 또는 전체 순차 배포
+bash cloudformation/deploy.sh all
+
+# 스택 상태 확인
+bash cloudformation/deploy.sh status
+```
+
+**Phase 1** — 기본 인프라 (독립 배포 가능)
+- VPC, 서브넷, NAT Gateway, VPC Endpoints
+- ALB + CloudFront (Custom Header 보호)
+- EC2 (VSCode Server + Streamlit Dashboard)
+- 8개 Export로 Phase 2 연동 지원
+
+**Phase 2** — AgentCore 사전 요구사항 (Phase 1 이후)
+- `AgentCoreEC2Policy`: Phase 1 EC2에 Bedrock/AgentCore/AIOps 읽기 권한 부착
+- `RuntimeAgentCoreRole`: AgentCore 런타임 실행 역할
+- `GatewayAgentCoreRole` + Lambda: 도구 디스패처
+- SSM 파라미터 (`/app/aiops/agentcore/*`)
+
+```
+Phase 1 (aiops-phase1)              Phase 2 (aiops-phase2)
+┌─────────────────────┐    Import   ┌─────────────────────────┐
+│ VPC + ALB + CF + EC2 │──────────>│ AgentCoreEC2Policy      │
+│ Exports: Role, SG,  │            │ RuntimeRole + Gateway   │
+│   Subnets, VPC-CIDR │            │ Lambda + SSM Params     │
+└─────────────────────┘            └─────────────────────────┘
+```
+
+#### 옵션 B: 단독 배포 (AgentCore만)
+
+기존 EC2 환경이 이미 있을 때 AgentCore 리소스만 배포합니다.
 
 ```bash
 bash prerequisite/deploy.sh
@@ -403,8 +449,10 @@ CloudWatch 모니터링은 AWS 공식 CloudWatch MCP 서버로 대체되었습�
 ### Gateway 설정
 
 ```bash
-# 1. 인프라 배포 (Lambda + IAM Role)
-bash prerequisite/deploy.sh
+# 1. 인프라 배포 (아래 중 택 1)
+bash cloudformation/deploy.sh all   # 단계별 배포 (Phase 1 + Phase 2)
+# 또는
+bash prerequisite/deploy.sh         # AgentCore만 단독 배포
 
 # 2. Gateway 생성 (Cognito + MCP Gateway + Lambda Target)
 python -m gateway.setup_gateway
