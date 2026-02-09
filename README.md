@@ -76,21 +76,134 @@ aiops_agent/
 └── requirements.txt
 ```
 
-## 시작하기
+## 사전 요구사항
 
-### 1. 환경 설정
+| 항목 | 버전/요건 | 확인 방법 |
+|------|-----------|-----------|
+| Python | 3.9+ | `python3 --version` |
+| AWS CLI | v2 | `aws --version` |
+| AWS 자격 증명 | IAM 사용자 또는 역할 | `aws sts get-caller-identity` |
+| uv (권장) 또는 pip | 최신 | `uv --version` 또는 `pip --version` |
+
+### 선택 사항
+
+| 항목 | 용도 | 필요 시점 |
+|------|------|-----------|
+| Docker | AgentCore Runtime 로컬 테스트 | 컨테이너 배포 시 |
+| Node.js / npx | 일부 MCP 서버 실행 | MCP 서버가 npx 기반일 때 |
+
+## 설치 순서
+
+### Step 1. 저장소 복제
+
+```bash
+git clone https://github.com/whchoi98/aiops-agent.git
+cd aiops-agent
+```
+
+### Step 2. 환경 설정 (자동)
 
 ```bash
 bash scripts/setup.sh
 ```
 
-### 2. 인프라 배포
+이 스크립트가 수행하는 작업:
+1. Python 3 버전 확인
+2. `.venv` 가상환경 생성
+3. `requirements.txt` 의존성 설치 (`strands-agents`, `bedrock-agentcore`, `boto3` 등)
+4. AWS 자격 증명 검증 (`aws sts get-caller-identity`)
+5. AWS 리전 설정
+
+### Step 3. 환경 변수 설정
+
+```bash
+# AWS 리전 및 프로필 설정
+export AWS_REGION=ap-northeast-2
+export AWS_PROFILE=default        # 사용할 AWS CLI 프로필
+```
+
+### Step 4. 인프라 배포 (CloudFormation)
+
+AgentCore Runtime에 필요한 IAM Role, Lambda 함수, SSM 파라미터를 배포합니다.
 
 ```bash
 bash prerequisite/deploy.sh
 ```
 
-### 3. 로컬 실행
+이 스크립트가 수행하는 작업:
+1. Lambda 코드 패키징 (`gateway/` + `tools/` → zip)
+2. S3 버킷 생성 및 Lambda zip 업로드
+3. CloudFormation 스택 배포 (`prerequisite/infrastructure.yaml`)
+   - `AIOpsGatewayLambda`: 도구 디스패치 Lambda 함수
+   - `GatewayAgentCoreRole`: IAM 역할
+   - SSM 파라미터 (`/app/aiops/agentcore/*`)
+
+### Step 5. Gateway 설정 (선택)
+
+다른 에이전트/서비스에서 AIOps 도구를 MCP로 사용하려면 Gateway를 생성합니다.
+
+```bash
+source .venv/bin/activate
+python -m gateway.setup_gateway
+```
+
+### Step 6. 실행 확인
+
+```bash
+source .venv/bin/activate
+
+# 도구 import 검증
+python -c "
+from agents.aiops_agent import TOOLS, SYSTEM_PROMPT
+print(f'통합 에이전트: {len(TOOLS)}개 도구 OK')
+"
+
+# 테스트 실행
+python -m pytest tests/ -v
+```
+
+## 실행 방법
+
+### 런타임 선택 가이드
+
+| 사용 목적 | 런타임 | 명령어 |
+|-----------|--------|--------|
+| 크로스 도메인 분석 (권장) | Super Agent | `python -m agents.super.runtime` |
+| 전체 도구 단일 에이전트 | 통합 | `python -m agents.runtime` |
+| CloudWatch 모니터링만 | Monitoring | `python -m agents.monitoring.runtime` |
+| 비용 분석만 | Cost | `python -m agents.cost.runtime` |
+| 보안 점검만 | Security | `python -m agents.security.runtime` |
+| 리소스/네트워크 관리만 | Resource | `python -m agents.resource.runtime` |
+
+### AgentCore Runtime 실행
+
+```bash
+source .venv/bin/activate
+
+# Super Agent (서브에이전트 오케스트레이션 + 전체 MCP) — 권장
+python -m agents.super.runtime
+
+# 통합 런타임 (18개 도구 전체 + 모든 MCP)
+python -m agents.runtime
+
+# 도메인별 특화 런타임
+python -m agents.monitoring.runtime   # CloudWatch MCP + EC2 상태
+python -m agents.cost.runtime         # Cost Explorer 4개 도구
+python -m agents.security.runtime     # Security Hub / GuardDuty / IAM
+python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
+```
+
+### Observability 포함 실행
+
+```bash
+# Super Agent + OTEL
+bash scripts/run_with_otel.sh agents.super.runtime
+
+# 통합 런타임 + OTEL
+bash scripts/run_with_otel.sh
+```
+
+### 로컬 테스트 (Runtime 없이)
 
 ```bash
 source .venv/bin/activate
@@ -103,20 +216,11 @@ print(response)
 "
 ```
 
-### 4. AgentCore Runtime 실행
+## 정리 (리소스 삭제)
 
 ```bash
-# 통합 런타임 (18개 도구 전체 + 모든 MCP)
-python -m agents.runtime
-
-# Super Agent (서브에이전트 오케스트레이션 + 전체 MCP)
-python -m agents.super.runtime
-
-# 도메인별 특화 런타임
-python -m agents.monitoring.runtime   # CloudWatch MCP + EC2 상태
-python -m agents.cost.runtime         # Cost Explorer 4개 도구
-python -m agents.security.runtime     # Security Hub / GuardDuty / IAM
-python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
+# Gateway + CloudFormation 스택 + SSM 파라미터 + S3 아티팩트 일괄 정리
+bash scripts/cleanup.sh
 ```
 
 ### 멀티 런타임 아키텍처
@@ -223,17 +327,12 @@ AWS OpenTelemetry Python Distro로 에이전트의 트레이스/메트릭/로그
 ### 실행 방법
 
 ```bash
-# 통합 런타임 (Observability 포함)
-bash scripts/run_with_otel.sh
-
-# Super Agent (서브에이전트 오케스트레이션)
-bash scripts/run_with_otel.sh agents.super.runtime
-
-# 도메인별 런타임
-bash scripts/run_with_otel.sh agents.monitoring.runtime
-bash scripts/run_with_otel.sh agents.cost.runtime
-bash scripts/run_with_otel.sh agents.security.runtime
-bash scripts/run_with_otel.sh agents.resource.runtime
+bash scripts/run_with_otel.sh                          # 통합 런타임
+bash scripts/run_with_otel.sh agents.super.runtime      # Super Agent
+bash scripts/run_with_otel.sh agents.monitoring.runtime  # 모니터링
+bash scripts/run_with_otel.sh agents.cost.runtime        # 비용
+bash scripts/run_with_otel.sh agents.security.runtime    # 보안
+bash scripts/run_with_otel.sh agents.resource.runtime    # 리소스
 ```
 
 ### OTEL 환경 변수
