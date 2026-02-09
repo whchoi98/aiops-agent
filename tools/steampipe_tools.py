@@ -1,8 +1,9 @@
-"""Steampipe 기반 AWS 자산 인벤토리 도구
+"""Steampipe 기반 AWS + Kubernetes 자산 인벤토리 도구
 
-Steampipe AWS 플러그인을 사용하여 SQL 기반으로 AWS 리소스를 조회합니다.
-사전 요건: steampipe CLI + aws 플러그인 설치
+Steampipe aws / kubernetes 플러그인을 사용하여 SQL 기반으로 리소스를 조회합니다.
+사전 요건:
   steampipe plugin install aws
+  steampipe plugin install kubernetes
 """
 from __future__ import annotations
 
@@ -50,7 +51,8 @@ def _run_steampipe_query(query: str, output_format: str = "json") -> dict[str, A
             "success": False,
             "error": (
                 "Steampipe not installed. Run: "
-                "brew install turbot/tap/steampipe && steampipe plugin install aws"
+                "brew install turbot/tap/steampipe && "
+                "steampipe plugin install aws kubernetes"
             ),
             "query": query,
         }
@@ -64,10 +66,12 @@ def _run_steampipe_query(query: str, output_format: str = "json") -> dict[str, A
 
 @tool
 def run_steampipe_query(query: str) -> dict[str, Any]:
-    """Steampipe SQL 쿼리를 실행하여 AWS 자산을 조회합니다.
+    """Steampipe SQL 쿼리를 실행하여 AWS 또는 Kubernetes 자산을 조회합니다.
 
     Args:
-        query: Steampipe SQL 쿼리 (예: SELECT * FROM aws_ec2_instance LIMIT 10)
+        query: Steampipe SQL 쿼리
+               AWS 예시: SELECT * FROM aws_ec2_instance LIMIT 10
+               K8s 예시: SELECT * FROM kubernetes_pod WHERE namespace = 'default'
 
     Returns:
         쿼리 결과
@@ -76,23 +80,28 @@ def run_steampipe_query(query: str) -> dict[str, Any]:
 
 
 @tool
-def query_aws_inventory(
+def query_inventory(
     resource_type: str,
     filters: dict[str, Any] | None = None,
     limit: int = 100,
 ) -> dict[str, Any]:
-    """AWS 자산 인벤토리를 유형별로 조회합니다.
+    """AWS 또는 Kubernetes 자산 인벤토리를 유형별로 조회합니다.
 
     Args:
-        resource_type: 리소스 유형 (ec2, s3, rds, lambda, iam_user, vpc,
-                       security_group, ebs, eks, ecs, dynamodb, sqs, sns 등)
-        filters: 필터 조건 (예: {"instance_state": "running"})
+        resource_type: 리소스 유형
+                       AWS: ec2, s3, rds, lambda, iam_user, vpc, security_group,
+                            ebs, eks, ecs, dynamodb, sqs, sns 등
+                       K8s: pod, deployment, service, namespace, node,
+                            configmap, secret, ingress, daemonset, statefulset,
+                            job, cronjob, pv, pvc, serviceaccount 등
+        filters: 필터 조건 (예: {"instance_state": "running"}, {"namespace": "default"})
         limit: 결과 최대 개수
 
     Returns:
         자산 목록
     """
     table_mapping = {
+        # ── AWS ──
         "ec2": "aws_ec2_instance",
         "s3": "aws_s3_bucket",
         "rds": "aws_rds_db_instance",
@@ -114,6 +123,27 @@ def query_aws_inventory(
         "sns": "aws_sns_topic",
         "kms": "aws_kms_key",
         "secretsmanager": "aws_secretsmanager_secret",
+        # ── Kubernetes ──
+        "pod": "kubernetes_pod",
+        "deployment": "kubernetes_deployment",
+        "service": "kubernetes_service",
+        "namespace": "kubernetes_namespace",
+        "node": "kubernetes_node",
+        "configmap": "kubernetes_config_map",
+        "secret": "kubernetes_secret",
+        "ingress": "kubernetes_ingress",
+        "daemonset": "kubernetes_daemonset",
+        "statefulset": "kubernetes_stateful_set",
+        "replicaset": "kubernetes_replicaset",
+        "job": "kubernetes_job",
+        "cronjob": "kubernetes_cronjob",
+        "pv": "kubernetes_persistent_volume",
+        "pvc": "kubernetes_persistent_volume_claim",
+        "serviceaccount": "kubernetes_service_account",
+        "networkpolicy": "kubernetes_network_policy",
+        "role": "kubernetes_role",
+        "clusterrole": "kubernetes_cluster_role",
+        "hpa": "kubernetes_horizontal_pod_autoscaler",
     }
 
     table = table_mapping.get(resource_type.lower())
@@ -147,12 +177,13 @@ def query_aws_inventory(
 
 @tool
 def get_asset_summary() -> dict[str, Any]:
-    """전체 AWS 자산 요약을 Steampipe로 조회합니다.
+    """전체 AWS + Kubernetes 자산 요약을 Steampipe로 조회합니다.
 
     Returns:
-        리소스 유형별 개수 및 요약 정보
+        리소스 유형별 개수 및 요약 정보 (AWS 12종 + K8s 6종)
     """
     queries = {
+        # ── AWS ──
         "ec2_instances": "SELECT COUNT(*) as count FROM aws_ec2_instance",
         "ec2_running": (
             "SELECT COUNT(*) as count FROM aws_ec2_instance "
@@ -168,6 +199,13 @@ def get_asset_summary() -> dict[str, Any]:
         "eks_clusters": "SELECT COUNT(*) as count FROM aws_eks_cluster",
         "ecs_clusters": "SELECT COUNT(*) as count FROM aws_ecs_cluster",
         "ebs_volumes": "SELECT COUNT(*) as count FROM aws_ebs_volume",
+        # ── Kubernetes ──
+        "k8s_namespaces": "SELECT COUNT(*) as count FROM kubernetes_namespace",
+        "k8s_nodes": "SELECT COUNT(*) as count FROM kubernetes_node",
+        "k8s_pods": "SELECT COUNT(*) as count FROM kubernetes_pod",
+        "k8s_deployments": "SELECT COUNT(*) as count FROM kubernetes_deployment",
+        "k8s_services": "SELECT COUNT(*) as count FROM kubernetes_service",
+        "k8s_daemonsets": "SELECT COUNT(*) as count FROM kubernetes_daemonset",
     }
 
     summary: dict[str, Any] = {}
@@ -435,3 +473,160 @@ def list_security_groups_steampipe(
         result["count"] = len(filtered)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Kubernetes 리소스 조회 도구
+# ---------------------------------------------------------------------------
+
+@tool
+def list_k8s_pods(
+    namespace: str | None = None,
+    status_phase: str | None = None,
+) -> dict[str, Any]:
+    """Kubernetes Pod 목록을 Steampipe SQL로 조회합니다.
+
+    Args:
+        namespace: 네임스페이스 필터 (default, kube-system 등)
+        status_phase: Pod 상태 필터 (Running, Pending, Failed, Succeeded)
+
+    Returns:
+        Pod 목록
+    """
+    conditions = []
+    if namespace:
+        conditions.append(f"namespace = '{namespace}'")
+    if status_phase:
+        conditions.append(f"phase = '{status_phase}'")
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    query = f"""
+    SELECT name, namespace, phase, pod_ip, node_name,
+           creation_timestamp, restart_count, labels
+    FROM kubernetes_pod
+    WHERE {where_clause}
+    ORDER BY creation_timestamp DESC
+    """
+    return _run_steampipe_query(query)
+
+
+@tool
+def list_k8s_deployments(
+    namespace: str | None = None,
+) -> dict[str, Any]:
+    """Kubernetes Deployment 목록을 Steampipe SQL로 조회합니다.
+
+    Args:
+        namespace: 네임스페이스 필터
+
+    Returns:
+        Deployment 목록 (레플리카 상태 포함)
+    """
+    conditions = []
+    if namespace:
+        conditions.append(f"namespace = '{namespace}'")
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    query = f"""
+    SELECT name, namespace, replicas, ready_replicas,
+           available_replicas, unavailable_replicas,
+           creation_timestamp, labels
+    FROM kubernetes_deployment
+    WHERE {where_clause}
+    ORDER BY creation_timestamp DESC
+    """
+    return _run_steampipe_query(query)
+
+
+@tool
+def list_k8s_services(
+    namespace: str | None = None,
+    service_type: str | None = None,
+) -> dict[str, Any]:
+    """Kubernetes Service 목록을 Steampipe SQL로 조회합니다.
+
+    Args:
+        namespace: 네임스페이스 필터
+        service_type: 서비스 유형 필터 (ClusterIP, NodePort, LoadBalancer)
+
+    Returns:
+        Service 목록
+    """
+    conditions = []
+    if namespace:
+        conditions.append(f"namespace = '{namespace}'")
+    if service_type:
+        conditions.append(f"type = '{service_type}'")
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+    query = f"""
+    SELECT name, namespace, type, cluster_ip,
+           external_ips, ports, selector, creation_timestamp
+    FROM kubernetes_service
+    WHERE {where_clause}
+    ORDER BY creation_timestamp DESC
+    """
+    return _run_steampipe_query(query)
+
+
+@tool
+def list_k8s_nodes() -> dict[str, Any]:
+    """Kubernetes 노드 목록을 Steampipe SQL로 조회합니다.
+
+    Returns:
+        노드 목록 (상태, 용량 정보 포함)
+    """
+    query = """
+    SELECT name, uid, pod_cidr, provider_id,
+           allocatable, capacity, conditions,
+           creation_timestamp, labels
+    FROM kubernetes_node
+    ORDER BY creation_timestamp DESC
+    """
+    return _run_steampipe_query(query)
+
+
+@tool
+def get_k8s_cluster_summary() -> dict[str, Any]:
+    """Kubernetes 클러스터 자산 요약을 조회합니다.
+
+    Returns:
+        네임스페이스, 노드, Pod, Deployment, Service, DaemonSet 개수 요약
+    """
+    queries = {
+        "namespaces": "SELECT COUNT(*) as count FROM kubernetes_namespace",
+        "nodes": "SELECT COUNT(*) as count FROM kubernetes_node",
+        "pods_total": "SELECT COUNT(*) as count FROM kubernetes_pod",
+        "pods_running": (
+            "SELECT COUNT(*) as count FROM kubernetes_pod "
+            "WHERE phase = 'Running'"
+        ),
+        "deployments": "SELECT COUNT(*) as count FROM kubernetes_deployment",
+        "services": "SELECT COUNT(*) as count FROM kubernetes_service",
+        "daemonsets": "SELECT COUNT(*) as count FROM kubernetes_daemonset",
+        "statefulsets": "SELECT COUNT(*) as count FROM kubernetes_stateful_set",
+        "jobs": "SELECT COUNT(*) as count FROM kubernetes_job",
+        "cronjobs": "SELECT COUNT(*) as count FROM kubernetes_cronjob",
+    }
+
+    summary: dict[str, Any] = {}
+    errors = []
+
+    for resource, query in queries.items():
+        result = _run_steampipe_query(query)
+        if result.get("success"):
+            data = result.get("data", [])
+            summary[resource] = data[0].get("count", 0) if data else 0
+        else:
+            errors.append(f"{resource}: {result.get('error')}")
+            summary[resource] = "error"
+
+    return {
+        "success": len(errors) == 0,
+        "summary": summary,
+        "total_resources": sum(v for v in summary.values() if isinstance(v, int)),
+        "errors": errors if errors else None,
+    }

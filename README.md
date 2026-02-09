@@ -17,7 +17,7 @@ AWS 인프라를 지능적으로 모니터링하고 운영하는 AIOps 에이전
 - **Lambda 관리**: Lambda Tool MCP 연동
 - **네트워크 분석**: VPC 로컬 도구 + Network MCP 통합
 - **리소스 인벤토리**: 전체 AWS 자산 요약 + AWS API MCP
-- **자산 분석**: Steampipe SQL 기반 20+ 리소스 유형 인벤토리 조회
+- **자산 분석**: Steampipe SQL 기반 AWS 20+ / Kubernetes 20+ 리소스 유형 인벤토리 조회
 - **문서 참조**: AWS Documentation MCP 통합
 
 ## 프로젝트 구조
@@ -45,7 +45,7 @@ aiops_agent/
 │   │   ├── agent.py          #   도구: ec2 4 + vpc 5 + inventory 2 (11개)
 │   │   └── runtime.py        #   엔트리포인트
 │   ├── inventory/            # 자산 인벤토리 특화 런타임 (Steampipe)
-│   │   ├── agent.py          #   도구: steampipe_tools 10개
+│   │   ├── agent.py          #   도구: steampipe_tools 15개
 │   │   └── runtime.py        #   엔트리포인트
 │   └── super/                # Super Agent (서브에이전트 오케스트레이션)
 │       ├── agent.py          #   5개 @tool 서브에이전트 래퍼
@@ -56,7 +56,7 @@ aiops_agent/
 │   ├── ec2_tools.py         # EC2 인스턴스 관리
 │   ├── vpc_tools.py         # VPC 네트워크 분석
 │   ├── resource_inventory.py # 리소스 인벤토리 (boto3)
-│   └── steampipe_tools.py   # Steampipe SQL 기반 자산 인벤토리
+│   └── steampipe_tools.py   # Steampipe SQL 기반 AWS + K8s 자산 인벤토리
 ├── gateway/
 │   ├── api_spec.json        # 18개 도구 MCP 스키마 정의
 │   ├── lambda_handler.py    # Lambda 디스패치 핸들러
@@ -95,7 +95,7 @@ aiops_agent/
 
 | 항목 | 용도 | 필요 시점 |
 |------|------|-----------|
-| Steampipe + aws 플러그인 | Inventory Agent (SQL 기반 자산 조회) | 자산 인벤토리 분석 시 |
+| Steampipe + aws/kubernetes 플러그인 | Inventory Agent (SQL 기반 자산 조회) | 자산 인벤토리 분석 시 |
 | Docker | AgentCore Runtime 로컬 테스트 | 컨테이너 배포 시 |
 | Node.js / npx | 일부 MCP 서버 실행 | MCP 서버가 npx 기반일 때 |
 
@@ -135,13 +135,16 @@ export AWS_PROFILE=default        # 사용할 AWS CLI 프로필
 # Steampipe 설치 (Linux)
 sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
 
-# AWS 플러그인 설치
+# AWS + Kubernetes 플러그인 설치
 steampipe plugin install aws
+steampipe plugin install kubernetes
 
 # 설치 확인
 steampipe query "SELECT COUNT(*) FROM aws_ec2_instance"
+steampipe query "SELECT COUNT(*) FROM kubernetes_pod"
 ```
 
+> **Note**: Kubernetes 플러그인은 현재 kubeconfig 컨텍스트의 클러스터에 연결합니다.
 > Steampipe 없이도 다른 에이전트(Monitoring, Cost, Security, Resource)는 정상 동작합니다.
 
 ### Step 5. 인프라 배포 (CloudFormation)
@@ -214,7 +217,7 @@ python -m agents.monitoring.runtime   # CloudWatch MCP + EC2 상태
 python -m agents.cost.runtime         # Cost Explorer 4개 도구
 python -m agents.security.runtime     # Security Hub / GuardDuty / IAM
 python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
-python -m agents.inventory.runtime    # Steampipe SQL 기반 자산 분석 (10개 도구)
+python -m agents.inventory.runtime    # Steampipe SQL 기반 자산 분석 (15개 도구)
 ```
 
 ### Observability 포함 실행
@@ -263,7 +266,7 @@ Super Agent는 이들을 @tool로 래핑하여 단일 진입점에서 크로스 
   ┌──────────┐ ┌──────────┐  ┌──────────┐ ┌──────────┐ ┌──────────┐
   │Monitoring│ │   Cost   │  │ Security │ │ Resource │ │Inventory │
   │  Agent   │ │  Agent   │  │  Agent   │ │  Agent   │ │  Agent   │
-  │ (1 tool) │ │ (4 tools)│  │ (3 tools)│ │(11 tools)│ │(10 tools)│
+  │ (1 tool) │ │ (4 tools)│  │ (3 tools)│ │(11 tools)│ │(15 tools)│
   └──────────┘ └──────────┘  └──────────┘ └──────────┘ └──────────┘
 
                         ┌─────────────────────────────┐
@@ -303,7 +306,7 @@ Super Agent는 이들을 @tool로 래핑하여 단일 진입점에서 크로스 
 | **Cost** | cost_explorer_tools (4) | docs (1) | `configs/cost.yaml` |
 | **Security** | security_tools (3) | cloudtrail, docs (2) | `configs/security.yaml` |
 | **Resource** | ec2 + vpc + inventory (11) | eks, ecs, lambda, network, api, docs (6) | `configs/resource.yaml` |
-| **Inventory** | steampipe_tools (10) | docs (1) | `configs/inventory.yaml` |
+| **Inventory** | steampipe_tools (15) | docs (1) | `configs/inventory.yaml` |
 | **통합** | 전체 18개 | 전체 9개 | `configs/mcp_servers.yaml` |
 
 모든 런타임은 `agents/runtime_base.py`의 `create_app()` 팩토리를 공유하며,
@@ -524,13 +527,13 @@ python -m pytest tests/test_local.py -v
 | resource_inventory | `get_resource_summary` | 전체 자산 요약 |
 | resource_inventory | `list_resources_by_type` | 유형별 리소스 목록 |
 
-**Inventory Runtime** (10개 — Steampipe 필요)
+**Inventory Runtime** (15개 — Steampipe 필요)
 
 | 모듈 | 도구 | 설명 |
 |------|------|------|
 | steampipe_tools | `run_steampipe_query` | 범용 Steampipe SQL 쿼리 |
-| steampipe_tools | `query_aws_inventory` | 유형별 자산 조회 (20+ 유형) |
-| steampipe_tools | `get_asset_summary` | 전체 자산 요약 (12개 유형 카운트) |
+| steampipe_tools | `query_inventory` | 유형별 자산 조회 (AWS 20+ / K8s 20+ 유형) |
+| steampipe_tools | `get_asset_summary` | 전체 AWS + K8s 자산 요약 (18개 유형 카운트) |
 | steampipe_tools | `list_ec2_instances_steampipe` | EC2 인스턴스 (상태/유형/리전 필터) |
 | steampipe_tools | `list_s3_buckets_steampipe` | S3 버킷 (퍼블릭 액세스 필터) |
 | steampipe_tools | `list_rds_instances_steampipe` | RDS 인스턴스 (엔진/상태 필터) |
@@ -538,6 +541,11 @@ python -m pytest tests/test_local.py -v
 | steampipe_tools | `list_iam_users_steampipe` | IAM 사용자 (MFA 필터) |
 | steampipe_tools | `list_vpc_resources_steampipe` | VPC + 서브넷 |
 | steampipe_tools | `list_security_groups_steampipe` | 보안 그룹 (인터넷 개방 필터) |
+| steampipe_tools | `list_k8s_pods` | K8s Pod (네임스페이스/상태 필터) |
+| steampipe_tools | `list_k8s_deployments` | K8s Deployment (레플리카 상태) |
+| steampipe_tools | `list_k8s_services` | K8s Service (유형 필터) |
+| steampipe_tools | `list_k8s_nodes` | K8s 노드 (용량/상태 정보) |
+| steampipe_tools | `get_k8s_cluster_summary` | K8s 클러스터 자산 요약 |
 
 ### 외부 MCP 서버 (9개)
 
