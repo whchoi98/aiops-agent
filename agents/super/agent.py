@@ -1,6 +1,6 @@
 """Super Agent — 도메인별 서브 에이전트 오케스트레이션
 
-사용자 쿼리를 분석하여 전문 에이전트(Monitoring, Cost, Security, Resource)에 위임하고,
+사용자 쿼리를 분석하여 전문 에이전트(Monitoring, Cost, Security, Resource, Inventory)에 위임하고,
 여러 에이전트 결과를 종합하여 포괄적인 답변을 제공합니다.
 
 참조: AgentCore Samples — multi-agent-runtime 패턴
@@ -76,6 +76,21 @@ def ask_resource_agent(query: str) -> str:
     return response.message["content"][0]["text"]
 
 
+@tool
+def ask_inventory_agent(query: str) -> str:
+    """AWS 자산 인벤토리 분석을 전문 에이전트에 위임합니다.
+    Steampipe SQL로 전체 자산 현황, 보안 취약 리소스, 미사용 리소스를 조회합니다.
+
+    Args:
+        query: 자산 인벤토리 관련 질문 또는 분석 요청
+    """
+    from agents.inventory.agent import SYSTEM_PROMPT, TOOLS
+
+    agent = Agent(model=_sub_model, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
+    response = agent(query)
+    return response.message["content"][0]["text"]
+
+
 SYSTEM_PROMPT = """당신은 AWS AIOps Super Agent입니다.
 
 ## 역할
@@ -86,12 +101,14 @@ SYSTEM_PROMPT = """당신은 AWS AIOps Super Agent입니다.
 1. **ask_monitoring_agent**: CloudWatch 메트릭/알람/로그, EC2 상태 분석
 2. **ask_cost_agent**: 비용 분석, 예측, 라이트사이징 권장
 3. **ask_security_agent**: Security Hub, GuardDuty, IAM 보안 점검
-4. **ask_resource_agent**: EC2, VPC, EBS, 리소스 인벤토리 관리
+4. **ask_resource_agent**: EC2, VPC, EBS, 리소스 관리
+5. **ask_inventory_agent**: Steampipe SQL 기반 전체 자산 인벤토리 분석
 
 ## 오케스트레이션 원칙
 - 단순 질문은 하나의 전문 에이전트에 위임
 - 크로스 도메인 질문은 여러 에이전트를 순차 호출하여 종합
   예: "비용이 올랐는데 원인이 뭐야?" → ask_cost_agent + ask_resource_agent
+  예: "전체 자산 현황과 보안 이슈" → ask_inventory_agent + ask_security_agent
 - 전문 에이전트 결과를 종합하여 일관된 답변을 구성
 - MCP 도구도 직접 사용 가능 (간단한 조회, CloudWatch/CloudTrail 등)
 
@@ -106,4 +123,5 @@ TOOLS = [
     ask_cost_agent,
     ask_security_agent,
     ask_resource_agent,
+    ask_inventory_agent,
 ]

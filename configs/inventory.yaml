@@ -1,0 +1,17 @@
+# Inventory Runtime — MCP 서버 설정
+#
+# Steampipe 자산 분석 + AWS 문서 참조
+
+gateway:
+  enabled: true
+
+mcp_servers:
+  # AWS Documentation MCP — 자산 관리 가이드 참조
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"

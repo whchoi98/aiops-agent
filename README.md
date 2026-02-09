@@ -17,6 +17,7 @@ AWS 인프라를 지능적으로 모니터링하고 운영하는 AIOps 에이전
 - **Lambda 관리**: Lambda Tool MCP 연동
 - **네트워크 분석**: VPC 로컬 도구 + Network MCP 통합
 - **리소스 인벤토리**: 전체 AWS 자산 요약 + AWS API MCP
+- **자산 분석**: Steampipe SQL 기반 20+ 리소스 유형 인벤토리 조회
 - **문서 참조**: AWS Documentation MCP 통합
 
 ## 프로젝트 구조
@@ -43,15 +44,19 @@ aiops_agent/
 │   ├── resource/             # 리소스 관리 특화 런타임
 │   │   ├── agent.py          #   도구: ec2 4 + vpc 5 + inventory 2 (11개)
 │   │   └── runtime.py        #   엔트리포인트
+│   ├── inventory/            # 자산 인벤토리 특화 런타임 (Steampipe)
+│   │   ├── agent.py          #   도구: steampipe_tools 10개
+│   │   └── runtime.py        #   엔트리포인트
 │   └── super/                # Super Agent (서브에이전트 오케스트레이션)
-│       ├── agent.py          #   4개 @tool 서브에이전트 래퍼
+│       ├── agent.py          #   5개 @tool 서브에이전트 래퍼
 │       └── runtime.py        #   엔트리포인트
 ├── tools/
 │   ├── cost_explorer_tools.py # 비용 분석
 │   ├── security_tools.py    # Security Hub / GuardDuty
 │   ├── ec2_tools.py         # EC2 인스턴스 관리
 │   ├── vpc_tools.py         # VPC 네트워크 분석
-│   └── resource_inventory.py # 리소스 인벤토리
+│   ├── resource_inventory.py # 리소스 인벤토리 (boto3)
+│   └── steampipe_tools.py   # Steampipe SQL 기반 자산 인벤토리
 ├── gateway/
 │   ├── api_spec.json        # 18개 도구 MCP 스키마 정의
 │   ├── lambda_handler.py    # Lambda 디스패치 핸들러
@@ -62,6 +67,7 @@ aiops_agent/
 │   ├── cost.yaml            # 비용 MCP (docs)
 │   ├── security.yaml        # 보안 MCP (cloudtrail, docs)
 │   ├── resource.yaml        # 리소스 MCP (eks, ecs, lambda, network, api, docs)
+│   ├── inventory.yaml       # 인벤토리 MCP (docs)
 │   └── super.yaml           # Super Agent MCP (전체 9개 MCP 서버)
 ├── prerequisite/
 │   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM)
@@ -89,6 +95,7 @@ aiops_agent/
 
 | 항목 | 용도 | 필요 시점 |
 |------|------|-----------|
+| Steampipe + aws 플러그인 | Inventory Agent (SQL 기반 자산 조회) | 자산 인벤토리 분석 시 |
 | Docker | AgentCore Runtime 로컬 테스트 | 컨테이너 배포 시 |
 | Node.js / npx | 일부 MCP 서버 실행 | MCP 서버가 npx 기반일 때 |
 
@@ -122,7 +129,22 @@ export AWS_REGION=ap-northeast-2
 export AWS_PROFILE=default        # 사용할 AWS CLI 프로필
 ```
 
-### Step 4. 인프라 배포 (CloudFormation)
+### Step 4. Steampipe 설치 (Inventory Agent 사용 시)
+
+```bash
+# Steampipe 설치 (Linux)
+sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+
+# AWS 플러그인 설치
+steampipe plugin install aws
+
+# 설치 확인
+steampipe query "SELECT COUNT(*) FROM aws_ec2_instance"
+```
+
+> Steampipe 없이도 다른 에이전트(Monitoring, Cost, Security, Resource)는 정상 동작합니다.
+
+### Step 5. 인프라 배포 (CloudFormation)
 
 AgentCore Runtime에 필요한 IAM Role, Lambda 함수, SSM 파라미터를 배포합니다.
 
@@ -138,7 +160,7 @@ bash prerequisite/deploy.sh
    - `GatewayAgentCoreRole`: IAM 역할
    - SSM 파라미터 (`/app/aiops/agentcore/*`)
 
-### Step 5. Gateway 설정 (선택)
+### Step 6. Gateway 설정 (선택)
 
 다른 에이전트/서비스에서 AIOps 도구를 MCP로 사용하려면 Gateway를 생성합니다.
 
@@ -147,7 +169,7 @@ source .venv/bin/activate
 python -m gateway.setup_gateway
 ```
 
-### Step 6. 실행 확인
+### Step 7. 실행 확인
 
 ```bash
 source .venv/bin/activate
@@ -174,6 +196,7 @@ python -m pytest tests/ -v
 | 비용 분석만 | Cost | `python -m agents.cost.runtime` |
 | 보안 점검만 | Security | `python -m agents.security.runtime` |
 | 리소스/네트워크 관리만 | Resource | `python -m agents.resource.runtime` |
+| 자산 인벤토리 (Steampipe) | Inventory | `python -m agents.inventory.runtime` |
 
 ### AgentCore Runtime 실행
 
@@ -191,6 +214,7 @@ python -m agents.monitoring.runtime   # CloudWatch MCP + EC2 상태
 python -m agents.cost.runtime         # Cost Explorer 4개 도구
 python -m agents.security.runtime     # Security Hub / GuardDuty / IAM
 python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
+python -m agents.inventory.runtime    # Steampipe SQL 기반 자산 분석 (10개 도구)
 ```
 
 ### Observability 포함 실행
@@ -225,22 +249,22 @@ bash scripts/cleanup.sh
 
 ### 멀티 런타임 아키텍처
 
-독립 배포/스케일링/장애 격리가 가능한 4개 도메인별 런타임으로 분리되어 있습니다.
+독립 배포/스케일링/장애 격리가 가능한 5개 도메인별 런타임으로 분리되어 있습니다.
 Super Agent는 이들을 @tool로 래핑하여 단일 진입점에서 크로스 도메인 오케스트레이션을 제공합니다.
 
 ```
-                        ┌──────────────────────────────────┐
-                        │          Super Agent             │
-                        │  ask_monitoring/cost/security/   │
-                        │  resource_agent + 9 MCP 도구     │
-                        └──────────┬───────────────────────┘
-               ┌───────────┬──────┴───────┬────────────┐
-               ▼           ▼              ▼            ▼
-       ┌──────────┐ ┌──────────┐  ┌──────────┐ ┌──────────┐
-       │Monitoring│ │   Cost   │  │ Security │ │ Resource │
-       │  Agent   │ │  Agent   │  │  Agent   │ │  Agent   │
-       │ (1 tool) │ │ (4 tools)│  │ (3 tools)│ │(11 tools)│
-       └──────────┘ └──────────┘  └──────────┘ └──────────┘
+                        ┌───────────────────────────────────────┐
+                        │            Super Agent                │
+                        │  ask_monitoring/cost/security/        │
+                        │  resource/inventory_agent + 9 MCP     │
+                        └──────────┬────────────────────────────┘
+          ┌───────────┬──────┴───────┬────────────┬────────────┐
+          ▼           ▼              ▼            ▼            ▼
+  ┌──────────┐ ┌──────────┐  ┌──────────┐ ┌──────────┐ ┌──────────┐
+  │Monitoring│ │   Cost   │  │ Security │ │ Resource │ │Inventory │
+  │  Agent   │ │  Agent   │  │  Agent   │ │  Agent   │ │  Agent   │
+  │ (1 tool) │ │ (4 tools)│  │ (3 tools)│ │(11 tools)│ │(10 tools)│
+  └──────────┘ └──────────┘  └──────────┘ └──────────┘ └──────────┘
 
                         ┌─────────────────────────────┐
                         │      runtime_base.py        │
@@ -274,11 +298,12 @@ Super Agent는 이들을 @tool로 래핑하여 단일 진입점에서 크로스 
 
 | 런타임 | 로컬 도구 | MCP 서버 | MCP 설정 |
 |--------|-----------|----------|----------|
-| **Super** | 4 서브에이전트 @tool | 전체 9개 | `configs/super.yaml` |
+| **Super** | 5 서브에이전트 @tool | 전체 9개 | `configs/super.yaml` |
 | **Monitoring** | describe_ec2_instances (1) | cloudwatch, app-signals, network, docs (4) | `configs/monitoring.yaml` |
 | **Cost** | cost_explorer_tools (4) | docs (1) | `configs/cost.yaml` |
 | **Security** | security_tools (3) | cloudtrail, docs (2) | `configs/security.yaml` |
 | **Resource** | ec2 + vpc + inventory (11) | eks, ecs, lambda, network, api, docs (6) | `configs/resource.yaml` |
+| **Inventory** | steampipe_tools (10) | docs (1) | `configs/inventory.yaml` |
 | **통합** | 전체 18개 | 전체 9개 | `configs/mcp_servers.yaml` |
 
 모든 런타임은 `agents/runtime_base.py`의 `create_app()` 팩토리를 공유하며,
@@ -333,6 +358,7 @@ bash scripts/run_with_otel.sh agents.monitoring.runtime  # 모니터링
 bash scripts/run_with_otel.sh agents.cost.runtime        # 비용
 bash scripts/run_with_otel.sh agents.security.runtime    # 보안
 bash scripts/run_with_otel.sh agents.resource.runtime    # 리소스
+bash scripts/run_with_otel.sh agents.inventory.runtime   # 인벤토리
 ```
 
 ### OTEL 환경 변수
@@ -497,6 +523,21 @@ python -m pytest tests/test_local.py -v
 | vpc_tools | `analyze_network_topology` | 네트워크 토폴로지 분석 |
 | resource_inventory | `get_resource_summary` | 전체 자산 요약 |
 | resource_inventory | `list_resources_by_type` | 유형별 리소스 목록 |
+
+**Inventory Runtime** (10개 — Steampipe 필요)
+
+| 모듈 | 도구 | 설명 |
+|------|------|------|
+| steampipe_tools | `run_steampipe_query` | 범용 Steampipe SQL 쿼리 |
+| steampipe_tools | `query_aws_inventory` | 유형별 자산 조회 (20+ 유형) |
+| steampipe_tools | `get_asset_summary` | 전체 자산 요약 (12개 유형 카운트) |
+| steampipe_tools | `list_ec2_instances_steampipe` | EC2 인스턴스 (상태/유형/리전 필터) |
+| steampipe_tools | `list_s3_buckets_steampipe` | S3 버킷 (퍼블릭 액세스 필터) |
+| steampipe_tools | `list_rds_instances_steampipe` | RDS 인스턴스 (엔진/상태 필터) |
+| steampipe_tools | `list_lambda_functions_steampipe` | Lambda 함수 (런타임/리전 필터) |
+| steampipe_tools | `list_iam_users_steampipe` | IAM 사용자 (MFA 필터) |
+| steampipe_tools | `list_vpc_resources_steampipe` | VPC + 서브넷 |
+| steampipe_tools | `list_security_groups_steampipe` | 보안 그룹 (인터넷 개방 필터) |
 
 ### 외부 MCP 서버 (9개)
 
