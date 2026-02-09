@@ -40,8 +40,11 @@ aiops_agent/
 │   ├── security/             # 보안 특화 런타임
 │   │   ├── agent.py          #   도구: security_tools 3개
 │   │   └── runtime.py        #   엔트리포인트
-│   └── resource/             # 리소스 관리 특화 런타임
-│       ├── agent.py          #   도구: ec2 4 + vpc 5 + inventory 2 (11개)
+│   ├── resource/             # 리소스 관리 특화 런타임
+│   │   ├── agent.py          #   도구: ec2 4 + vpc 5 + inventory 2 (11개)
+│   │   └── runtime.py        #   엔트리포인트
+│   └── super/                # Super Agent (서브에이전트 오케스트레이션)
+│       ├── agent.py          #   4개 @tool 서브에이전트 래퍼
 │       └── runtime.py        #   엔트리포인트
 ├── tools/
 │   ├── cost_explorer_tools.py # 비용 분석
@@ -58,7 +61,8 @@ aiops_agent/
 │   ├── monitoring.yaml      # 모니터링 MCP (cloudwatch, app-signals, network, docs)
 │   ├── cost.yaml            # 비용 MCP (docs)
 │   ├── security.yaml        # 보안 MCP (cloudtrail, docs)
-│   └── resource.yaml        # 리소스 MCP (eks, ecs, lambda, network, api, docs)
+│   ├── resource.yaml        # 리소스 MCP (eks, ecs, lambda, network, api, docs)
+│   └── super.yaml           # Super Agent MCP (전체 9개 MCP 서버)
 ├── prerequisite/
 │   ├── infrastructure.yaml  # CloudFormation (IAM Role, Lambda, SSM)
 │   └── deploy.sh            # 인프라 배포 스크립트
@@ -105,6 +109,9 @@ print(response)
 # 통합 런타임 (18개 도구 전체 + 모든 MCP)
 python -m agents.runtime
 
+# Super Agent (서브에이전트 오케스트레이션 + 전체 MCP)
+python -m agents.super.runtime
+
 # 도메인별 특화 런타임
 python -m agents.monitoring.runtime   # CloudWatch MCP + EC2 상태
 python -m agents.cost.runtime         # Cost Explorer 4개 도구
@@ -115,8 +122,22 @@ python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
 ### 멀티 런타임 아키텍처
 
 독립 배포/스케일링/장애 격리가 가능한 4개 도메인별 런타임으로 분리되어 있습니다.
+Super Agent는 이들을 @tool로 래핑하여 단일 진입점에서 크로스 도메인 오케스트레이션을 제공합니다.
 
 ```
+                        ┌──────────────────────────────────┐
+                        │          Super Agent             │
+                        │  ask_monitoring/cost/security/   │
+                        │  resource_agent + 9 MCP 도구     │
+                        └──────────┬───────────────────────┘
+               ┌───────────┬──────┴───────┬────────────┐
+               ▼           ▼              ▼            ▼
+       ┌──────────┐ ┌──────────┐  ┌──────────┐ ┌──────────┐
+       │Monitoring│ │   Cost   │  │ Security │ │ Resource │
+       │  Agent   │ │  Agent   │  │  Agent   │ │  Agent   │
+       │ (1 tool) │ │ (4 tools)│  │ (3 tools)│ │(11 tools)│
+       └──────────┘ └──────────┘  └──────────┘ └──────────┘
+
                         ┌─────────────────────────────┐
                         │      runtime_base.py        │
                         │  create_app() 공유 팩토리   │
@@ -149,6 +170,7 @@ python -m agents.resource.runtime     # EC2 + VPC + 인벤토리 (11개 도구)
 
 | 런타임 | 로컬 도구 | MCP 서버 | MCP 설정 |
 |--------|-----------|----------|----------|
+| **Super** | 4 서브에이전트 @tool | 전체 9개 | `configs/super.yaml` |
 | **Monitoring** | describe_ec2_instances (1) | cloudwatch, app-signals, network, docs (4) | `configs/monitoring.yaml` |
 | **Cost** | cost_explorer_tools (4) | docs (1) | `configs/cost.yaml` |
 | **Security** | security_tools (3) | cloudtrail, docs (2) | `configs/security.yaml` |
@@ -203,6 +225,9 @@ AWS OpenTelemetry Python Distro로 에이전트의 트레이스/메트릭/로그
 ```bash
 # 통합 런타임 (Observability 포함)
 bash scripts/run_with_otel.sh
+
+# Super Agent (서브에이전트 오케스트레이션)
+bash scripts/run_with_otel.sh agents.super.runtime
 
 # 도메인별 런타임
 bash scripts/run_with_otel.sh agents.monitoring.runtime

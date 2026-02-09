@@ -1,0 +1,106 @@
+# Super Agent — 전체 MCP 서버 연결
+#
+# 서브에이전트 외에도 Super Agent가 MCP 도구를 직접 사용할 수 있도록
+# 전체 9개 MCP 서버를 연결합니다.
+
+gateway:
+  enabled: true
+
+mcp_servers:
+  # ── 모니터링 ─────────────────────────────────────────────────
+
+  # AWS CloudWatch MCP — 메트릭/알람/로그/이상탐지
+  - name: aws-cloudwatch
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudwatch-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS CloudWatch Application Signals MCP — 서비스 레벨 헬스/SLO
+  - name: aws-cloudwatch-applicationsignals
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudwatch-applicationsignals-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Network MCP — VPC/TGW/Cloud WAN/Firewall 트러블슈팅
+  - name: aws-network
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-network-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # ── 보안 ─────────────────────────────────────────────────────
+
+  # AWS CloudTrail MCP — API 호출 이력/보안 감사
+  - name: aws-cloudtrail
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.cloudtrail-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # ── 리소스 관리 ──────────────────────────────────────────────
+
+  # AWS EKS MCP — Kubernetes 클러스터 관리
+  - name: aws-eks
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.eks-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS ECS MCP — 컨테이너 서비스 관리
+  - name: aws-ecs
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.ecs-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS Lambda Tool MCP — Lambda 함수 실행/관리
+  - name: aws-lambda-tool
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.lambda-tool-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # AWS API MCP — 범용 AWS API 호출
+  - name: aws-api
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-api-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
+
+  # ── 공유 (문서/지식) ─────────────────────────────────────────
+
+  # AWS Documentation MCP — AWS 공식 문서 검색/조회
+  - name: aws-documentation
+    enabled: true
+    transport: stdio
+    command: uvx
+    args:
+      - awslabs.aws-documentation-mcp-server@latest
+    env:
+      AWS_REGION: "${AWS_REGION}"
