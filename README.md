@@ -91,97 +91,89 @@ aiops_agent/
 
 | 항목 | 버전/요건 | 확인 방법 |
 |------|-----------|-----------|
-| Python | 3.9+ | `python3 --version` |
 | AWS CLI | v2 | `aws --version` |
 | AWS 자격 증명 | IAM 사용자 또는 역할 | `aws sts get-caller-identity` |
-| uv (권장) 또는 pip | 최신 | `uv --version` 또는 `pip --version` |
+| AWS 리전 | ap-northeast-2 (서울) 권장 | `echo $AWS_REGION` |
 
-### 선택 사항
-
-| 항목 | 용도 | 필요 시점 |
-|------|------|-----------|
-| Steampipe + aws/kubernetes 플러그인 | Inventory Agent (SQL 기반 자산 조회) | 자산 인벤토리 분석 시 |
-| Docker | AgentCore Runtime 로컬 테스트 | 컨테이너 배포 시 |
-| Node.js / npx | 일부 MCP 서버 실행 | MCP 서버가 npx 기반일 때 |
+> Phase 1 배포 시 EC2에 Python 3.12, Node.js 20, Docker, uv, code-server, Streamlit 등이 자동 설치됩니다.
 
 ## 설치 순서
 
-### Step 1. 저장소 복제
+### 전체 흐름
+
+```
+로컬/기존 환경                          Phase 1 EC2
+┌─────────────────────┐                ┌─────────────────────────────────┐
+│ Step 1. Phase 1 배포 │──CloudFront──>│ Step 2. VSCode 접속             │
+│   (VPC+EC2+ALB+CF)  │   URL         │ Step 3. Phase 2 배포            │
+└─────────────────────┘                │ Step 4. Gateway 설정            │
+                                       │ Step 5. 에이전트 실행           │
+                                       │ Step 6. (선택) Steampipe 설치   │
+                                       └─────────────────────────────────┘
+```
+
+### Step 1. Phase 1 배포 — 기본 인프라 (로컬/기존 환경에서 실행)
+
+AWS CLI가 설정된 환경에서 Phase 1 CloudFormation을 배포합니다.
 
 ```bash
 git clone https://github.com/whchoi98/aiops-agent.git
 cd aiops-agent
-```
-
-### Step 2. 환경 설정 (자동)
-
-```bash
-bash scripts/setup.sh
+bash cloudformation/deploy.sh phase1
 ```
 
 이 스크립트가 수행하는 작업:
-1. Python 3 버전 확인
-2. `.venv` 가상환경 생성
-3. `requirements.txt` 의존성 설치 (`strands-agents`, `bedrock-agentcore`, `boto3` 등)
-4. AWS 자격 증명 검증 (`aws sts get-caller-identity`)
-5. AWS 리전 설정
+1. CloudFront Prefix List 자동 조회
+2. VSCode 비밀번호 입력 프롬프트
+3. CloudFormation 스택 배포 (`aiops-phase1`)
 
-### Step 3. 환경 변수 설정
+**Phase 1 스택이 생성하는 리소스:**
+- VPC + 퍼블릭/프라이빗 서브넷 (2 AZ) + NAT Gateway
+- VPC Endpoints (SSM Session Manager용)
+- EC2 인스턴스 (Private Subnet) — UserData로 자동 설치:
+  - Python 3.12 + pip + venv
+  - Node.js 20, Docker, uv, AWS CLI v2
+  - code-server (VSCode Server) + Claude Code 확장
+  - Kiro CLI
+  - Streamlit + AIOps Dashboard
+  - `aiops-agent` 저장소 자동 클론 + Python 의존성 설치
+- ALB (Internet-facing) + CloudFront (HTTPS + Custom Header 보호)
 
+배포 완료 후 출력되는 **CloudFront URL**로 VSCode에 접속할 수 있습니다:
 ```bash
-# AWS 리전 및 프로필 설정
-export AWS_REGION=ap-northeast-2
-export AWS_PROFILE=default        # 사용할 AWS CLI 프로필
+# CloudFront URL 확인
+aws cloudformation describe-stacks --stack-name aiops-phase1 \
+  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontURL`].OutputValue' --output text
 ```
 
-### Step 4. Steampipe 설치 (Inventory Agent 사용 시)
+### Step 2. VSCode Server 접속
+
+1. CloudFront URL(`https://xxxx.cloudfront.net`)을 브라우저에서 접속
+2. Step 1에서 입력한 비밀번호로 로그인
+3. Streamlit Dashboard는 `https://xxxx.cloudfront.net/streamlit`에서 접근
+
+> **참고**: CloudFront 신규 배포 후 전파 완료까지 수 분 소요될 수 있습니다.
+
+### Step 3. Phase 2 배포 — AgentCore (EC2 VSCode 터미널에서 실행)
+
+VSCode 터미널에서 Phase 2를 배포합니다.
 
 ```bash
-# Steampipe 설치 (Linux)
-sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
-
-# AWS + Kubernetes 플러그인 설치
-steampipe plugin install aws
-steampipe plugin install kubernetes
-
-# 설치 확인
-steampipe query "SELECT COUNT(*) FROM aws_ec2_instance"
-steampipe query "SELECT COUNT(*) FROM kubernetes_pod"
-```
-
-> **Note**: Kubernetes 플러그인은 현재 kubeconfig 컨텍스트의 클러스터에 연결합니다.
-> Steampipe 없이도 다른 에이전트(Monitoring, Cost, Security, Resource)는 정상 동작합니다.
-
-### Step 5. 인프라 배포 (CloudFormation)
-
-#### 옵션 A: 단계별 배포 (권장)
-
-Phase 1(VPC+EC2)과 Phase 2(AgentCore)를 분리하여 독립적으로 배포합니다.
-
-```bash
-# Phase 1: VPC + CloudFront + ALB + EC2 (VSCode/Streamlit)
-bash cloudformation/deploy.sh phase1
-
-# Phase 2: AgentCore IAM + Lambda + EC2 권한 확장 (Phase 1 필수)
+cd /home/ec2-user/aiops_agent
+git pull                                # 최신 코드 동기화
 bash cloudformation/deploy.sh phase2
-
-# 또는 전체 순차 배포
-bash cloudformation/deploy.sh all
-
-# 스택 상태 확인
-bash cloudformation/deploy.sh status
 ```
 
-**Phase 1** — 기본 인프라 (독립 배포 가능)
-- VPC, 서브넷, NAT Gateway, VPC Endpoints
-- ALB + CloudFront (Custom Header 보호)
-- EC2 (VSCode Server + Streamlit Dashboard)
-- 8개 Export로 Phase 2 연동 지원
+이 스크립트가 수행하는 작업:
+1. Phase 1 스택 존재 확인
+2. Lambda 코드 패키징 (`gateway/` + `tools/` → zip → S3 업로드)
+3. CloudFormation 스택 배포 (`aiops-phase2`)
 
-**Phase 2** — AgentCore 사전 요구사항 (Phase 1 이후)
-- `AgentCoreEC2Policy`: Phase 1 EC2에 Bedrock/AgentCore/AIOps 읽기 권한 부착
+**Phase 2 스택이 생성하는 리소스:**
+- `AgentCoreEC2Policy`: Phase 1 EC2 Role에 Bedrock/AgentCore/AIOps 권한 부착
 - `RuntimeAgentCoreRole`: AgentCore 런타임 실행 역할
-- `GatewayAgentCoreRole` + Lambda: 도구 디스패처
+- `GatewayAgentCoreRole`: Gateway → Lambda 호출 역할
+- `AIOpsGatewayLambda`: 도구 디스패치 Lambda 함수
 - SSM 파라미터 (`/app/aiops/agentcore/*`)
 
 ```
@@ -193,34 +185,20 @@ Phase 1 (aiops-phase1)              Phase 2 (aiops-phase2)
 └─────────────────────┘            └─────────────────────────┘
 ```
 
-#### 옵션 B: 단독 배포 (AgentCore만)
-
-기존 EC2 환경이 이미 있을 때 AgentCore 리소스만 배포합니다.
-
-```bash
-bash prerequisite/deploy.sh
-```
-
-이 스크립트가 수행하는 작업:
-1. Lambda 코드 패키징 (`gateway/` + `tools/` → zip)
-2. S3 버킷 생성 및 Lambda zip 업로드
-3. CloudFormation 스택 배포 (`prerequisite/infrastructure.yaml`)
-   - `AIOpsGatewayLambda`: 도구 디스패치 Lambda 함수
-   - `GatewayAgentCoreRole`: IAM 역할
-   - SSM 파라미터 (`/app/aiops/agentcore/*`)
-
-### Step 6. Gateway 설정 (선택)
+### Step 4. Gateway 설정
 
 다른 에이전트/서비스에서 AIOps 도구를 MCP로 사용하려면 Gateway를 생성합니다.
 
 ```bash
+cd /home/ec2-user/aiops_agent
 source .venv/bin/activate
 python -m gateway.setup_gateway
 ```
 
-### Step 7. 실행 확인
+### Step 5. 실행 확인 및 에이전트 시작
 
 ```bash
+cd /home/ec2-user/aiops_agent
 source .venv/bin/activate
 
 # 도구 import 검증
@@ -231,6 +209,55 @@ print(f'통합 에이전트: {len(TOOLS)}개 도구 OK')
 
 # 테스트 실행
 python -m pytest tests/ -v
+
+# 에이전트 실행 (Super Agent 권장)
+python -m agents.super.runtime
+```
+
+### Step 6. Steampipe 설치 (선택 — Inventory Agent 사용 시)
+
+```bash
+# Steampipe 설치 (Linux)
+sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+
+# AWS + Kubernetes 플러그인 설치
+steampipe plugin install aws
+steampipe plugin install kubernetes
+
+# 설치 확인
+steampipe query "SELECT COUNT(*) FROM aws_ec2_instance"
+```
+
+> **Note**: Steampipe 없이도 다른 에이전트(Monitoring, Cost, Security, Resource)는 정상 동작합니다.
+
+### 스택 관리
+
+```bash
+# 양쪽 스택 상태 확인
+bash cloudformation/deploy.sh status
+
+# 환경 변수로 스택 이름 커스터마이징
+PHASE1_STACK_NAME=my-phase1 PHASE2_STACK_NAME=my-phase2 bash cloudformation/deploy.sh all
+```
+
+### 대안: AgentCore만 단독 배포
+
+기존 EC2 환경이 이미 있을 때 Phase 1 없이 AgentCore 리소스만 배포합니다.
+
+```bash
+git clone https://github.com/whchoi98/aiops-agent.git
+cd aiops-agent
+
+# Python 3.12 venv 설정
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# AgentCore 인프라만 배포
+bash prerequisite/deploy.sh
+
+# Gateway 설정
+python -m gateway.setup_gateway
 ```
 
 ## 실행 방법
