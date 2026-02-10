@@ -83,6 +83,31 @@ sed -i 's/aiops-dev/your-profile/g' .mcp.json
 - Steampipe (자산 인벤토리 기능)
 - Docker (AgentCore Runtime 로컬 테스트)
 
+## 인벤토리 대시보드
+
+Steampipe 기반 AWS 자산 인벤토리를 Streamlit 대시보드로 시각화합니다.
+
+### 실행
+
+```bash
+bash scripts/start_dashboard.sh
+# http://<EC2-IP>:8501 으로 접속
+```
+
+### 페이지 구성
+
+| 페이지 | 설명 |
+|--------|------|
+| Summary | 리소스 유형별 카운트 (EC2, S3, RDS, Lambda 등) |
+| EC2 | 인스턴스 목록 + 상태/유형/리전 필터 |
+| S3 | 버킷 목록 + 퍼블릭 액세스 경고 |
+| Security | IAM 사용자 (MFA 경고) + 보안 그룹 (0.0.0.0/0 경고) |
+| Network | VPC/서브넷 목록 + VPC ID 필터 |
+
+- `src/tools/steampipe/inventory.py`의 기존 `@tool` 함수를 그대로 재활용
+- 5분 캐시(`@st.cache_data(ttl=300)`)로 반복 호출 최소화
+- Steampipe가 설치·실행 중이어야 데이터가 표시됩니다
+
 ## 아키텍처
 
 ### 목표 구성
@@ -114,6 +139,7 @@ aws-aiops-platform/
 ├── src/
 │   ├── agents/           # AI 에이전트
 │   ├── tools/            # MCP 도구
+│   ├── dashboard/        # Streamlit 인벤토리 대시보드
 │   ├── gateway/          # AgentCore Gateway
 │   └── shared/           # 공유 유틸리티
 ├── infrastructure/       # IaC (CDK, Terraform)
