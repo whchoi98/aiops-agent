@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Phase 1 - Base Infra: VPC + CloudFront + ALB + EC2 (VSCode/Streamlit). Exports for Phase 2 cross-stack references.'
+Description: 'Secure VSCode Server + Streamlit Dashboard with CloudFront -> Internet-facing ALB -> Private EC2 (Custom Header Protection)'
 
 Metadata:
   "AWS::CloudFormation::Interface":
@@ -372,6 +372,7 @@ Resources:
       - EC2MessagesEndpoint
     Properties:
       InstanceType: !Ref InstanceType
+      PrivateIpAddress: 10.254.21.101
       ImageId: !Ref AmazonLinux2023AmiId
       IamInstanceProfile: !Ref VSCodeInstanceProfile
       SubnetId: !Ref PrivateSubnetA
@@ -825,53 +826,3 @@ Outputs:
   Architecture:
     Description: Network Architecture
     Value: "CloudFront (HTTPS) -> Internet-facing ALB (HTTP:80 + Custom Header) -> EC2 (VSCode:8888 + Streamlit:8501)"
-
-  # --- Cross-stack Exports for Phase 2 ---
-
-  PrivateSubnetAId:
-    Description: Private Subnet A ID
-    Value: !Ref PrivateSubnetA
-    Export:
-      Name: !Sub "${AWS::StackName}-PrivateSubnetA-ID"
-
-  PrivateSubnetBId:
-    Description: Private Subnet B ID
-    Value: !Ref PrivateSubnetB
-    Export:
-      Name: !Sub "${AWS::StackName}-PrivateSubnetB-ID"
-
-  PublicSubnetAId:
-    Description: Public Subnet A ID
-    Value: !Ref PublicSubnetA
-    Export:
-      Name: !Sub "${AWS::StackName}-PublicSubnetA-ID"
-
-  PublicSubnetBId:
-    Description: Public Subnet B ID
-    Value: !Ref PublicSubnetB
-    Export:
-      Name: !Sub "${AWS::StackName}-PublicSubnetB-ID"
-
-  VPCCidr:
-    Description: VPC CIDR Block
-    Value: !Ref VPCCIDRBlock
-    Export:
-      Name: !Sub "${AWS::StackName}-VPC-CIDR"
-
-  VSCodeRoleName:
-    Description: VSCode EC2 IAM Role Name (for Phase 2 policy attachment)
-    Value: !Ref VSCodeServerRole
-    Export:
-      Name: !Sub "${AWS::StackName}-VSCode-Role-Name"
-
-  VSCodeSecurityGroupId:
-    Description: VSCode Security Group ID
-    Value: !Ref VSCodeSecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-VSCode-SG-ID"
-
-  SSMSecurityGroupId:
-    Description: SSM Endpoint Security Group ID
-    Value: !Ref SSMSecurityGroup
-    Export:
-      Name: !Sub "${AWS::StackName}-SSM-SG-ID"
