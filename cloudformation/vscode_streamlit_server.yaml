@@ -550,7 +550,16 @@ Resources:
 
           systemctl daemon-reload
           systemctl enable streamlit
-          # Note: streamlit 서비스는 aiops_agent 클론 후 수동 시작
+
+          # ── aiops_agent 저장소 클론 + Streamlit 시작 ──
+          cd /home/ec2-user
+          sudo -u ec2-user git clone https://github.com/whchoi98/aiops-agent.git aiops_agent || true
+          if [ -f /home/ec2-user/aiops_agent/dashboard/app.py ]; then
+            systemctl start streamlit
+            echo "Streamlit service started"
+          else
+            echo "WARNING: dashboard/app.py not found, streamlit not started"
+          fi
 
           # Signal completion
           echo "VSCode Server + Streamlit installation completed at $(date)" | tee -a /var/log/user-data.log
