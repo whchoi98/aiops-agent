@@ -131,12 +131,13 @@ bash cloudformation/deploy.sh phase1
 - VPC + 퍼블릭/프라이빗 서브넷 (2 AZ) + NAT Gateway
 - VPC Endpoints (SSM Session Manager용)
 - EC2 인스턴스 (Private Subnet) — UserData로 자동 설치:
-  - Python 3.12 + pip + venv
+  - Python 3.12 + pip + venv (`/home/ec2-user/aiops_agent/.venv`)
+  - `python` 심볼릭 링크 자동 생성 (AL2023 호환)
   - Node.js 20, Docker, uv, AWS CLI v2
   - code-server (VSCode Server) + Claude Code 확장
   - Kiro CLI
-  - Streamlit + AIOps Dashboard
-  - `aiops-agent` 저장소 자동 클론 + Python 의존성 설치
+  - Streamlit Dashboard (venv 내 streamlit 바이너리 사용)
+  - `aiops-agent` 저장소 자동 클론 + `requirements.txt` 기반 의존성 설치
 - ALB (Internet-facing) + CloudFront (HTTPS + Custom Header 보호)
 
 배포 완료 후 출력되는 **CloudFront URL**로 VSCode에 접속할 수 있습니다:
@@ -649,6 +650,41 @@ AWS_PROFILE=default          # AWS CLI 프로필
 OTEL_SERVICE_NAME=aiops-agent-strands  # 서비스 식별자
 OTEL_LOG_GROUP=agents/aiops-agent-logs # CloudWatch 로그 그룹
 OTEL_LOG_STREAM=default                # CloudWatch 로그 스트림
+```
+
+## 트러블슈팅
+
+### UserData 실행 확인
+
+EC2 인스턴스에 접속 후 UserData 스크립트 실행 로그를 확인합니다:
+
+```bash
+# SSM 세션으로 접속
+aws ssm start-session --target <instance-id>
+
+# UserData 로그 확인
+cat /var/log/user-data.log
+```
+
+### 자주 발생하는 문제
+
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| `python: command not found` | AL2023에는 `python3`만 설치됨 | UserData가 `/usr/local/bin/python` 심볼릭 링크 자동 생성 |
+| venv 디렉토리 없음 (`.venv/`) | `requirements.txt` 누락 시 venv 미생성 (v202adc5 이전) | 최신 코드에서 venv를 무조건 생성하도록 수정됨 |
+| Streamlit 서비스 실패 | 시스템 Python에 패키지 미설치 | venv 내 streamlit 바이너리를 사용하도록 수정됨 |
+| `source .venv/bin/activate` 실패 | venv 미생성 상태 | `python3.12 -m venv .venv` 수동 실행 후 재시도 |
+
+### 수동 venv 복구
+
+UserData에서 venv 생성이 실패한 경우 수동으로 복구합니다:
+
+```bash
+cd /home/ec2-user/aiops_agent
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
 ## 참조
