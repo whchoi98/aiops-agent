@@ -399,7 +399,10 @@ Resources:
           # Install required packages with conflict resolution
           dnf install -y --allowerasing curl jq tar gzip python3
 
-          # Install pip3 and Python packages
+          # Install Python 3.12 (strands-agents requires 3.10+)
+          dnf install -y python3.12 python3.12-pip python3.12-devel
+
+          # Install pip3 and Python packages (system python for streamlit)
           dnf install -y python3-pip
           pip3 install boto3 click bedrock-agentcore
 
@@ -550,9 +553,19 @@ Resources:
           systemctl daemon-reload
           systemctl enable streamlit
 
-          # ── aiops_agent 저장소 클론 + Streamlit 시작 ──
+          # ── aiops_agent 저장소 클론 ──
           cd /home/ec2-user
           sudo -u ec2-user git clone https://github.com/whchoi98/aiops-agent.git aiops_agent || true
+
+          # ── Python 3.12 venv + 의존성 설치 ──
+          if [ -f /home/ec2-user/aiops_agent/requirements.txt ]; then
+            cd /home/ec2-user/aiops_agent
+            sudo -u ec2-user python3.12 -m venv .venv
+            sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt'
+            echo "Python 3.12 venv + dependencies installed"
+          fi
+
+          # ── Streamlit 시작 ──
           if [ -f /home/ec2-user/aiops_agent/dashboard/app.py ]; then
             systemctl start streamlit
             echo "Streamlit service started"
