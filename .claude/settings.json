@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pytest *)",
+      "Bash(ruff format *)",
+      "Bash(ruff check *)",
+      "Bash(mypy *)",
+      "Bash(pip install *)",
+      "Bash(uv *)",
+      "Bash(python -m *)",
+      "Bash(agentcore *)",
+      "Bash(cdk *)",
+      "Bash(terraform plan *)",
+      "Bash(terraform validate *)",
+      "Bash(aws cloudformation validate-template *)",
+      "Bash(git *)",
+      "Bash(curl -X POST http://localhost:*)",
+      "Read(configs/*)",
+      "Read(docs/*)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*credentials*)",
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(cdk deploy *)",
+      "Bash(cdk destroy *)",
+      "Bash(aws * delete-*)",
+      "Bash(aws * terminate-*)"
+    ]
+  },
+  "env": {
+    "AWS_REGION": "ap-northeast-2",
+    "PYTHONPATH": "${workspaceFolder}/src",
+    "LOG_LEVEL": "INFO"
+  },
+  "attribution": {
+    "commit": "Generated with AI assistance\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+  }
+}

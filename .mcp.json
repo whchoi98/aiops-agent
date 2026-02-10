@@ -1,0 +1,92 @@
+{
+  "mcpServers": {
+    "aws-cloudwatch": {
+      "command": "uvx",
+      "args": ["awslabs.cloudwatch-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev"
+      }
+    },
+    "aws-cost-explorer": {
+      "command": "uvx",
+      "args": ["awslabs.cost-explorer-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev"
+      }
+    },
+    "aws-cfn": {
+      "command": "uvx",
+      "args": ["awslabs.cfn-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev"
+      }
+    },
+    "aws-iam": {
+      "command": "uvx",
+      "args": ["awslabs.iam-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev"
+      }
+    },
+    "aws-eks": {
+      "command": "uvx",
+      "args": [
+        "awslabs.eks-mcp-server@latest",
+        "--allow-write",
+        "--allow-sensitive-data-access"
+      ],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-ecs": {
+      "command": "uvx",
+      "args": ["awslabs.ecs-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev",
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "ALLOW_WRITE": "true",
+        "ALLOW_SENSITIVE_DATA": "true"
+      }
+    },
+    "aws-network": {
+      "command": "uvx",
+      "args": ["awslabs.aws-network-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-ccapi": {
+      "command": "uvx",
+      "args": ["awslabs.ccapi-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "AWS_PROFILE": "aiops-dev",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
+    },
+    "aws-documentation": {
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2"
+      }
+    },
+    "aws-diagram": {
+      "command": "uvx",
+      "args": ["awslabs.diagram-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2"
+      }
+    }
+  }
+}
