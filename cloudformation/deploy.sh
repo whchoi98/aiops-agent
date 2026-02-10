@@ -109,9 +109,9 @@ package_lambda() {
     if ! aws s3 ls "s3://${LAMBDA_S3_BUCKET}" --region "${AWS_REGION}" 2>/dev/null; then
         echo "Creating S3 bucket: ${LAMBDA_S3_BUCKET}"
         if [ "${AWS_REGION}" = "us-east-1" ]; then
-            aws s3 mb "s3://${LAMBDA_S3_BUCKET}" --region "${AWS_REGION}"
+            aws s3api create-bucket --bucket "${LAMBDA_S3_BUCKET}" --region "${AWS_REGION}"
         else
-            aws s3 mb "s3://${LAMBDA_S3_BUCKET}" --region "${AWS_REGION}" \
+            aws s3api create-bucket --bucket "${LAMBDA_S3_BUCKET}" --region "${AWS_REGION}" \
                 --create-bucket-configuration LocationConstraint="${AWS_REGION}"
         fi
     fi
