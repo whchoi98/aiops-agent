@@ -541,8 +541,8 @@ Resources:
           Type=simple
           User=ec2-user
           WorkingDirectory=/home/ec2-user/aiops_agent
-          Environment="PATH=/usr/local/bin:/usr/bin:/bin:/home/ec2-user/.local/bin"
-          ExecStart=/usr/local/bin/streamlit run dashboard/app.py --server.baseUrlPath=/streamlit
+          Environment="PATH=/home/ec2-user/aiops_agent/.venv/bin:/usr/local/bin:/usr/bin:/bin:/home/ec2-user/.local/bin"
+          ExecStart=/home/ec2-user/aiops_agent/.venv/bin/streamlit run dashboard/app.py --server.baseUrlPath=/streamlit
           Restart=always
           RestartSec=10
 
@@ -558,12 +558,17 @@ Resources:
           sudo -u ec2-user git clone https://github.com/whchoi98/aiops-agent.git aiops_agent || true
 
           # ── Python 3.12 venv + 의존성 설치 ──
-          if [ -f /home/ec2-user/aiops_agent/requirements.txt ]; then
-            cd /home/ec2-user/aiops_agent
-            sudo -u ec2-user python3.12 -m venv .venv
+          cd /home/ec2-user/aiops_agent
+          sudo -u ec2-user python3.12 -m venv .venv
+          if [ -f requirements.txt ]; then
             sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt'
-            echo "Python 3.12 venv + dependencies installed"
+          else
+            sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install streamlit pandas strands-agents boto3'
           fi
+          echo "Python 3.12 venv + dependencies installed"
+
+          # python 심볼릭 링크 (AL2023에는 python3만 있음)
+          ln -sf /home/ec2-user/aiops_agent/.venv/bin/python /usr/local/bin/python
 
           # ── Streamlit 시작 ──
           if [ -f /home/ec2-user/aiops_agent/dashboard/app.py ]; then
