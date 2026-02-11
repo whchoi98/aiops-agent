@@ -171,6 +171,11 @@ def create_gateway() -> None:
                 }
             }
         },
+        credentialProviderConfigurations=[
+            {
+                "credentialProviderType": "GATEWAY_IAM_ROLE",
+            }
+        ],
     )
     target_id = target_response["gatewayTargetId"]
     print(f"Gateway Target created: {target_id}")
