@@ -177,7 +177,7 @@ def create_gateway() -> None:
             }
         ],
     )
-    target_id = target_response["gatewayTargetId"]
+    target_id = target_response["targetId"]
     print(f"Gateway Target created: {target_id}")
 
     # Target 이 ACTIVE 상태가 될 때까지 대기
