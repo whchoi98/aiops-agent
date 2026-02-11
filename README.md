@@ -211,8 +211,15 @@ print(f'통합 에이전트: {len(TOOLS)}개 도구 OK')
 # 테스트 실행
 python -m pytest tests/ -v
 
-# 에이전트 실행 (Super Agent 권장)
-python -m agents.super.runtime
+# 에이전트 실행 (Super Agent 권장) — 백그라운드
+nohup python -m agents.super.runtime > /tmp/super-agent.log 2>&1 &
+echo "Super Agent PID: $!"
+
+# 로그 확인
+tail -f /tmp/super-agent.log
+
+# 중지하려면
+kill $(pgrep -f 'agents.super.runtime')
 ```
 
 ### Step 6. Steampipe 설치 (선택 — Inventory Agent 사용 시)
