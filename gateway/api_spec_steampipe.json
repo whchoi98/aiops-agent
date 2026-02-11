@@ -1,0 +1,220 @@
+[
+  {
+    "name": "run_steampipe_query",
+    "description": "Steampipe SQL 쿼리를 실행하여 AWS 또는 Kubernetes 자산을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Steampipe SQL 쿼리 (예: SELECT * FROM aws_ec2_instance LIMIT 10)"
+        }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "query_inventory",
+    "description": "AWS 또는 Kubernetes 자산 인벤토리를 유형별로 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "resource_type": {
+          "type": "string",
+          "description": "리소스 유형 (ec2, s3, rds, lambda, vpc, pod, deployment 등)"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "최대 결과 수 (기본값: 100)"
+        }
+      },
+      "required": ["resource_type"]
+    }
+  },
+  {
+    "name": "get_asset_summary",
+    "description": "전체 AWS + Kubernetes 자산 요약 (리소스 유형별 개수)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_ec2_instances_steampipe",
+    "description": "EC2 인스턴스 목록을 Steampipe SQL로 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "description": "인스턴스 상태 필터 (running, stopped, terminated)"
+        },
+        "instance_type": {
+          "type": "string",
+          "description": "인스턴스 유형 필터"
+        },
+        "region": {
+          "type": "string",
+          "description": "리전 필터"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_s3_buckets_steampipe",
+    "description": "S3 버킷 목록과 보안 상태를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "list_rds_instances_steampipe",
+    "description": "RDS 인스턴스 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "engine": {
+          "type": "string",
+          "description": "엔진 필터 (mysql, postgres, aurora 등)"
+        },
+        "status": {
+          "type": "string",
+          "description": "상태 필터 (available, stopped 등)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_lambda_functions_steampipe",
+    "description": "Lambda 함수 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runtime": {
+          "type": "string",
+          "description": "런타임 필터"
+        },
+        "region": {
+          "type": "string",
+          "description": "리전 필터"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_iam_users_steampipe",
+    "description": "IAM 사용자 목록과 보안 상태를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mfa_enabled": {
+          "type": "string",
+          "description": "MFA 필터 (true, false)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_vpc_resources_steampipe",
+    "description": "VPC 및 서브넷 정보를 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "vpc_id": {
+          "type": "string",
+          "description": "특정 VPC ID로 필터링"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_security_groups_steampipe",
+    "description": "보안 그룹 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "vpc_id": {
+          "type": "string",
+          "description": "VPC ID로 필터링"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_k8s_pods",
+    "description": "Kubernetes Pod 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "네임스페이스 필터"
+        },
+        "status_phase": {
+          "type": "string",
+          "description": "Pod 상태 필터 (Running, Pending, Failed)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_k8s_deployments",
+    "description": "Kubernetes Deployment 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "네임스페이스 필터"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_k8s_services",
+    "description": "Kubernetes Service 목록을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "네임스페이스 필터"
+        },
+        "service_type": {
+          "type": "string",
+          "description": "서비스 유형 필터 (ClusterIP, NodePort, LoadBalancer)"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "list_k8s_nodes",
+    "description": "Kubernetes 노드 목록 (상태, 용량 정보)을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  {
+    "name": "get_k8s_cluster_summary",
+    "description": "Kubernetes 클러스터 자산 요약을 조회합니다",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  }
+]

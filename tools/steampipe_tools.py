@@ -1,22 +1,103 @@
 """Steampipe 기반 AWS + Kubernetes 자산 인벤토리 도구
 
 Steampipe aws / kubernetes 플러그인을 사용하여 SQL 기반으로 리소스를 조회합니다.
+
+연결 방식:
+  1. PostgreSQL 서비스 모드 (기본) — AgentCore Runtime 호환
+     EC2에서 steampipe service 실행 → psycopg2로 연결
+     환경변수: STEAMPIPE_HOST (기본: localhost), STEAMPIPE_PORT (기본: 9193),
+               STEAMPIPE_PASSWORD (기본: steampipe_aiops)
+  2. subprocess fallback — psycopg2 미설치 또는 서비스 미실행 시
+     로컬 steampipe CLI 직접 호출
+
 사전 요건:
   steampipe plugin install aws
   steampipe plugin install kubernetes
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import subprocess
+from decimal import Decimal
 from typing import Any
 
 from strands import tool
 
+# ---------------------------------------------------------------------------
+# PostgreSQL 연결 설정
+# ---------------------------------------------------------------------------
 
-def _run_steampipe_query(query: str, output_format: str = "json") -> dict[str, Any]:
-    """Steampipe 쿼리 실행 내부 헬퍼"""
+try:
+    import psycopg2
+    import psycopg2.extras
+
+    _HAS_PSYCOPG2 = True
+except ImportError:
+    _HAS_PSYCOPG2 = False
+
+_STEAMPIPE_HOST = os.getenv("STEAMPIPE_HOST", "localhost")
+_STEAMPIPE_PORT = int(os.getenv("STEAMPIPE_PORT", "9193"))
+_STEAMPIPE_DB = os.getenv("STEAMPIPE_DB", "steampipe")
+_STEAMPIPE_USER = os.getenv("STEAMPIPE_USER", "steampipe")
+_STEAMPIPE_PASSWORD = os.getenv("STEAMPIPE_PASSWORD", "steampipe_aiops")
+
+
+def _serialize_value(val: Any) -> Any:
+    """psycopg2 반환 값을 JSON 직렬화 가능한 타입으로 변환"""
+    if isinstance(val, datetime.datetime):
+        return val.isoformat()
+    if isinstance(val, datetime.date):
+        return val.isoformat()
+    if isinstance(val, Decimal):
+        return int(val) if val == val.to_integral_value() else float(val)
+    return val
+
+
+def _serialize_row(row: dict) -> dict:
+    return {k: _serialize_value(v) for k, v in row.items()}
+
+
+# ---------------------------------------------------------------------------
+# 쿼리 실행 엔진
+# ---------------------------------------------------------------------------
+
+
+def _run_steampipe_query_pg(query: str) -> dict[str, Any]:
+    """PostgreSQL 프로토콜로 Steampipe 서비스에 쿼리 (AgentCore Runtime 호환)"""
+    try:
+        conn = psycopg2.connect(
+            host=_STEAMPIPE_HOST,
+            port=_STEAMPIPE_PORT,
+            dbname=_STEAMPIPE_DB,
+            user=_STEAMPIPE_USER,
+            password=_STEAMPIPE_PASSWORD,
+            connect_timeout=10,
+        )
+        conn.set_session(autocommit=True)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(query)
+                if cur.description:
+                    rows = [_serialize_row(dict(row)) for row in cur.fetchall()]
+                    return {
+                        "success": True,
+                        "data": rows,
+                        "count": len(rows),
+                        "query": query,
+                    }
+                return {"success": True, "data": [], "count": 0, "query": query}
+        finally:
+            conn.close()
+    except Exception as e:
+        return {"success": False, "error": str(e), "query": query}
+
+
+def _run_steampipe_query_subprocess(
+    query: str, output_format: str = "json",
+) -> dict[str, Any]:
+    """subprocess로 Steampipe CLI 직접 호출 (로컬 fallback)"""
     try:
         result = subprocess.run(
             ["steampipe", "query", query, "--output", output_format],
@@ -51,13 +132,27 @@ def _run_steampipe_query(query: str, output_format: str = "json") -> dict[str, A
             "success": False,
             "error": (
                 "Steampipe not installed. Run: "
-                "brew install turbot/tap/steampipe && "
+                "sudo /bin/sh -c \"$(curl -fsSL https://steampipe.io/install/steampipe.sh)\" && "
                 "steampipe plugin install aws kubernetes"
             ),
             "query": query,
         }
     except json.JSONDecodeError as e:
         return {"success": False, "error": f"JSON parse error: {e}", "query": query}
+
+
+def _run_steampipe_query(query: str, output_format: str = "json") -> dict[str, Any]:
+    """Steampipe 쿼리 실행 — PostgreSQL 서비스 우선, subprocess fallback"""
+    if _HAS_PSYCOPG2:
+        result = _run_steampipe_query_pg(query)
+        if result.get("success"):
+            return result
+        # PG 연결 실패 시 subprocess fallback (로컬 환경)
+        err = str(result.get("error", "")).lower()
+        if "could not connect" in err or "connection refused" in err:
+            return _run_steampipe_query_subprocess(query, output_format)
+        return result
+    return _run_steampipe_query_subprocess(query, output_format)
 
 
 # ---------------------------------------------------------------------------

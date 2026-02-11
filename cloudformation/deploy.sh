@@ -5,14 +5,17 @@
 # Usage:
 #   ./deploy.sh phase1          # Phase 1: VPC + CloudFront + ALB + EC2
 #   ./deploy.sh phase2          # Phase 2: AgentCore IAM + Lambda
-#   ./deploy.sh all             # Phase 1 -> Phase 2 sequential deploy
-#   ./deploy.sh status          # Show both stack statuses
+#   ./deploy.sh phase3          # Phase 3: ECS Fargate Steampipe MCP Server
+#   ./deploy.sh all             # Phase 1 -> Phase 2 -> Phase 3 sequential deploy
+#   ./deploy.sh status          # Show all stack statuses
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PHASE1_STACK="${PHASE1_STACK_NAME:-aiops-phase1}"
 PHASE2_STACK="${PHASE2_STACK_NAME:-aiops-phase2}"
+PHASE3_STACK="${PHASE3_STACK_NAME:-aiops-phase3}"
+ECR_REPO_NAME="aiops-steampipe"
 
 # Region
 if [ -z "${AWS_REGION:-}" ]; then
@@ -209,7 +212,90 @@ deploy_phase2() {
 }
 
 # =============================================================================
-# Status: Show both stack statuses
+# Phase 3: ECS Fargate Steampipe MCP Server
+# =============================================================================
+deploy_phase3() {
+    echo ""
+    echo "============================================="
+    echo " Phase 3: ECS Fargate Steampipe MCP Server"
+    echo " Stack: ${PHASE3_STACK}"
+    echo " Phase1 ref: ${PHASE1_STACK}"
+    echo "============================================="
+
+    # Verify Phase 1 exists
+    if ! aws cloudformation describe-stacks --stack-name "${PHASE1_STACK}" \
+        --region "${AWS_REGION}" > /dev/null 2>&1; then
+        echo "ERROR: Phase 1 stack '${PHASE1_STACK}' not found."
+        exit 1
+    fi
+
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+    # 1. ECR repository (create if missing)
+    echo "Setting up ECR repository: ${ECR_REPO_NAME}..."
+    if ! aws ecr describe-repositories --repository-names "${ECR_REPO_NAME}" \
+        --region "${AWS_REGION}" > /dev/null 2>&1; then
+        aws ecr create-repository --repository-name "${ECR_REPO_NAME}" \
+            --region "${AWS_REGION}" > /dev/null
+        echo "ECR repository created."
+    fi
+
+    ECR_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
+    IMAGE_TAG="latest"
+    IMAGE_URI="${ECR_URI}:${IMAGE_TAG}"
+
+    # 2. Docker build & push
+    echo "Building Docker image..."
+    aws ecr get-login-password --region "${AWS_REGION}" | \
+        docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+    docker build -t "${ECR_REPO_NAME}:${IMAGE_TAG}" -f "${REPO_ROOT}/ecs/Dockerfile" "${REPO_ROOT}"
+    docker tag "${ECR_REPO_NAME}:${IMAGE_TAG}" "${IMAGE_URI}"
+
+    echo "Pushing to ECR: ${IMAGE_URI}..."
+    docker push "${IMAGE_URI}"
+    echo "Image pushed."
+
+    # 3. Validate template
+    echo "Validating Phase 3 template..."
+    aws cloudformation validate-template \
+        --template-body "file://${SCRIPT_DIR}/phase3-ecs-steampipe.yaml" \
+        --region "${AWS_REGION}" > /dev/null
+
+    # 4. Deploy
+    echo "Deploying Phase 3 stack: ${PHASE3_STACK}..."
+    output=$(aws cloudformation deploy \
+        --stack-name "${PHASE3_STACK}" \
+        --template-file "${SCRIPT_DIR}/phase3-ecs-steampipe.yaml" \
+        --capabilities CAPABILITY_NAMED_IAM \
+        --parameter-overrides \
+            "Phase1StackName=${PHASE1_STACK}" \
+            "ImageUri=${IMAGE_URI}" \
+        --region "${AWS_REGION}" 2>&1) || {
+        if echo "$output" | grep -qi "No changes to deploy"; then
+            echo "No updates needed for stack ${PHASE3_STACK}."
+        else
+            echo "Error deploying Phase 3:"
+            echo "$output"
+            exit 1
+        fi
+    }
+
+    echo ""
+    echo "Phase 3 deployed successfully."
+    aws cloudformation describe-stacks \
+        --stack-name "${PHASE3_STACK}" \
+        --query 'Stacks[0].Outputs' \
+        --output table \
+        --region "${AWS_REGION}"
+
+    echo ""
+    echo "Next: Re-run gateway setup to add Steampipe target:"
+    echo "  python -m gateway.setup_gateway"
+}
+
+# =============================================================================
+# Status: Show all stack statuses
 # =============================================================================
 show_status() {
     echo ""
@@ -217,7 +303,7 @@ show_status() {
     echo " Stack Status"
     echo "============================================="
 
-    for STACK in "${PHASE1_STACK}" "${PHASE2_STACK}"; do
+    for STACK in "${PHASE1_STACK}" "${PHASE2_STACK}" "${PHASE3_STACK}"; do
         echo ""
         echo "--- ${STACK} ---"
         if aws cloudformation describe-stacks --stack-name "${STACK}" \
@@ -237,17 +323,19 @@ show_status() {
 # Main
 # =============================================================================
 usage() {
-    echo "Usage: $0 {phase1|phase2|all|status}"
+    echo "Usage: $0 {phase1|phase2|phase3|all|status}"
     echo ""
     echo "Commands:"
     echo "  phase1   Deploy Phase 1 (VPC + CloudFront + ALB + EC2)"
     echo "  phase2   Deploy Phase 2 (AgentCore IAM + Lambda + EC2 policy)"
-    echo "  all      Deploy Phase 1 then Phase 2"
-    echo "  status   Show both stack statuses"
+    echo "  phase3   Deploy Phase 3 (ECS Fargate Steampipe MCP Server)"
+    echo "  all      Deploy Phase 1 -> Phase 2 -> Phase 3"
+    echo "  status   Show all stack statuses"
     echo ""
     echo "Environment variables:"
     echo "  PHASE1_STACK_NAME  Phase 1 stack name (default: aiops-phase1)"
     echo "  PHASE2_STACK_NAME  Phase 2 stack name (default: aiops-phase2)"
+    echo "  PHASE3_STACK_NAME  Phase 3 stack name (default: aiops-phase3)"
     echo "  AWS_REGION         AWS region (default: ap-northeast-2)"
 }
 
@@ -258,9 +346,13 @@ case "${1:-}" in
     phase2)
         deploy_phase2
         ;;
+    phase3)
+        deploy_phase3
+        ;;
     all)
         deploy_phase1
         deploy_phase2
+        deploy_phase3
         ;;
     status)
         show_status

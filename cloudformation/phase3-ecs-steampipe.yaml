@@ -1,0 +1,319 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Phase 3 - ECS Fargate Steampipe MCP Server for AgentCore Gateway'
+
+Parameters:
+  Phase1StackName:
+    Type: String
+    Default: aiops-phase1
+    Description: Phase 1 base infra stack name
+
+  ImageUri:
+    Type: String
+    Description: 'ECR image URI (e.g. 123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/aiops-steampipe:latest)'
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: 'ECS desired task count'
+
+  ContainerCpu:
+    Type: Number
+    Default: 512
+    Description: 'Fargate task CPU (256, 512, 1024, 2048, 4096)'
+
+  ContainerMemory:
+    Type: Number
+    Default: 1024
+    Description: 'Fargate task memory in MB'
+
+Resources:
+
+  # -----------------------------------------------------------------------
+  # ECS Cluster
+  # -----------------------------------------------------------------------
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${AWS::StackName}-cluster'
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  # -----------------------------------------------------------------------
+  # CloudWatch Log Group
+  # -----------------------------------------------------------------------
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}'
+      RetentionInDays: 14
+
+  # -----------------------------------------------------------------------
+  # Security Groups
+  # -----------------------------------------------------------------------
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'ALB for Steampipe MCP Server'
+      GroupName: !Sub '${AWS::StackName}-ALB-SG'
+      VpcId:
+        Fn::ImportValue: !Sub '${Phase1StackName}-VPC-ID'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp:
+            Fn::ImportValue: !Sub '${Phase1StackName}-VPC-CIDR'
+          Description: 'HTTP from VPC (AgentCore Gateway)'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ALB-SG'
+
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'ECS Fargate tasks for Steampipe'
+      GroupName: !Sub '${AWS::StackName}-Task-SG'
+      VpcId:
+        Fn::ImportValue: !Sub '${Phase1StackName}-VPC-ID'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: 'MCP server port from ALB'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Task-SG'
+
+  # -----------------------------------------------------------------------
+  # Internal ALB (VPC 내부 전용)
+  # -----------------------------------------------------------------------
+  InternalALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${AWS::StackName}-alb'
+      Scheme: internal
+      Type: application
+      Subnets:
+        - Fn::ImportValue: !Sub '${Phase1StackName}-PrivateSubnetA-ID'
+        - Fn::ImportValue: !Sub '${Phase1StackName}-PrivateSubnetB-ID'
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${AWS::StackName}-tg'
+      Port: 8080
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue: !Sub '${Phase1StackName}-VPC-ID'
+      TargetType: ip
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      HealthCheckTimeoutSeconds: 10
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref InternalALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # -----------------------------------------------------------------------
+  # IAM Roles
+  # -----------------------------------------------------------------------
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-TaskExecRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ECRPull
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: '*'
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-TaskRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SteampipeReadOnly
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AWSReadOnly
+                Effect: Allow
+                Action:
+                  # EC2
+                  - ec2:Describe*
+                  # S3
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketPolicyStatus
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketVersioning
+                  - s3:GetEncryptionConfiguration
+                  # RDS
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  # Lambda
+                  - lambda:ListFunctions
+                  - lambda:GetFunction
+                  # IAM
+                  - iam:ListUsers
+                  - iam:ListRoles
+                  - iam:GetUser
+                  - iam:ListMFADevices
+                  # VPC
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeNetworkAcls
+                  # EKS / ECS
+                  - eks:ListClusters
+                  - eks:DescribeCluster
+                  - ecs:ListClusters
+                  - ecs:DescribeClusters
+                  # Storage
+                  - ebs:DescribeVolumes
+                  - ec2:DescribeVolumes
+                  # Other
+                  - dynamodb:ListTables
+                  - sqs:ListQueues
+                  - sns:ListTopics
+                  - kms:ListKeys
+                  - cloudfront:ListDistributions
+                  - route53:ListHostedZones
+                Resource: '*'
+
+  # -----------------------------------------------------------------------
+  # ECS Task Definition
+  # -----------------------------------------------------------------------
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${AWS::StackName}-task'
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: steampipe-mcp
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: STEAMPIPE_HOST
+              Value: localhost
+            - Name: STEAMPIPE_PASSWORD
+              Value: steampipe_aiops
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: steampipe
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'curl -f http://localhost:8080/health || exit 1'
+            Interval: 30
+            Timeout: 10
+            Retries: 3
+            StartPeriod: 60
+
+  # -----------------------------------------------------------------------
+  # ECS Service
+  # -----------------------------------------------------------------------
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: !Sub '${AWS::StackName}-service'
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub '${Phase1StackName}-PrivateSubnetA-ID'
+            - Fn::ImportValue: !Sub '${Phase1StackName}-PrivateSubnetB-ID'
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+      LoadBalancers:
+        - ContainerName: steampipe-mcp
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+
+  # -----------------------------------------------------------------------
+  # SSM Parameters
+  # -----------------------------------------------------------------------
+  SteampipeALBUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/app/aiops/steampipe_mcp_url'
+      Type: String
+      Value: !Sub 'http://${InternalALB.DNSName}/mcp'
+      Description: 'Steampipe MCP Server URL (internal ALB)'
+
+Outputs:
+  ClusterArn:
+    Description: 'ECS Cluster ARN'
+    Value: !GetAtt ECSCluster.Arn
+
+  ServiceName:
+    Description: 'ECS Service Name'
+    Value: !Sub '${AWS::StackName}-service'
+
+  InternalALBUrl:
+    Description: 'Internal ALB URL for Steampipe MCP Server'
+    Value: !Sub 'http://${InternalALB.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ALBUrl'
+
+  SteampipeMCPUrl:
+    Description: 'Steampipe MCP Server endpoint'
+    Value: !Sub 'http://${InternalALB.DNSName}/mcp'
+    Export:
+      Name: !Sub '${AWS::StackName}-MCPUrl'

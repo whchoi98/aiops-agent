@@ -108,7 +108,8 @@ aiops_agent/
 │   (VPC+EC2+ALB+CF)  │   URL         │ Step 3. Phase 2 배포            │
 └─────────────────────┘                │ Step 4. Gateway 설정            │
                                        │ Step 5. 에이전트 실행           │
-                                       │ Step 6. (선택) Steampipe 설치   │
+                                       │ Step 6. Steampipe 확인          │
+                                       │ Step 7. (선택) Phase 3 ECS 배포 │
                                        └─────────────────────────────────┘
 ```
 
@@ -222,21 +223,59 @@ tail -f /tmp/super-agent.log
 kill $(pgrep -f 'agents.super.runtime')
 ```
 
-### Step 6. Steampipe 설치 (선택 — Inventory Agent 사용 시)
+### Step 6. Steampipe 서비스 확인 (UserData에서 자동 설치)
+
+Phase 1 UserData가 Steampipe를 **PostgreSQL 서비스 모드**(port 9193)로 자동 설치·실행합니다.
+EC2 로컬 에이전트와 AgentCore Runtime 양쪽에서 동일한 PostgreSQL 프로토콜로 접속합니다.
 
 ```bash
-# Steampipe 설치 (Linux)
-sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+# 서비스 상태 확인
+systemctl status steampipe
 
-# AWS + Kubernetes 플러그인 설치
-steampipe plugin install aws
-steampipe plugin install kubernetes
+# 플러그인 확인
+steampipe plugin list
 
-# 설치 확인
-steampipe query "SELECT COUNT(*) FROM aws_ec2_instance"
+# PostgreSQL 프로토콜로 쿼리 테스트
+psql -h localhost -p 9193 -U steampipe -d steampipe -c "SELECT COUNT(*) FROM aws_ec2_instance"
+# 비밀번호: steampipe_aiops
 ```
 
-> **Note**: Steampipe 없이도 다른 에이전트(Monitoring, Cost, Security, Resource)는 정상 동작합니다.
+**AgentCore Runtime에서 접속 설정**:
+```bash
+# AgentCore Runtime 환경변수 (EC2 Private IP 지정)
+export STEAMPIPE_HOST=<EC2_PRIVATE_IP>   # 예: 10.254.21.xx
+export STEAMPIPE_PASSWORD=steampipe_aiops
+```
+
+> **Note**: 수동 설치가 필요한 경우:
+> ```bash
+> sudo /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+> steampipe plugin install aws
+> steampipe plugin install kubernetes
+> sudo systemctl start steampipe
+> ```
+
+### Step 7. Phase 3 ECS Fargate 배포 (선택 — Steampipe MCP 서버)
+
+Steampipe를 ECS Fargate 컨테이너로 배포하여 AgentCore Gateway에서 HTTP 타겟으로 연결합니다.
+EC2 Steampipe 서비스 대신 독립적인 컨테이너 기반 아키텍처입니다.
+
+```bash
+# Phase 3 배포 (Docker build → ECR push → ECS Fargate)
+bash cloudformation/deploy.sh phase3
+
+# Gateway에 Steampipe 타겟 추가 (기존 Lambda 타겟 + ECS 타겟)
+python -m gateway.setup_gateway
+```
+
+배포 후 구조:
+```
+AgentCore Gateway
+├── aiops-tools (Lambda)       → boto3 기반 18개 도구
+└── aiops-steampipe (ECS Fargate) → Steampipe SQL 15개 도구
+```
+
+> **Note**: Phase 3는 Docker가 필요합니다. EC2에 Docker가 설치되어 있습니다.
 
 ### 스택 관리
 

@@ -278,6 +278,11 @@ Resources:
           ToPort: 8501
           SourceSecurityGroupId: !Ref PublicALBSecurityGroup
           Description: "Streamlit port from Public ALB only"
+        - IpProtocol: tcp
+          FromPort: 9193
+          ToPort: 9193
+          CidrIp: !GetAtt VPC.CidrBlock
+          Description: "Steampipe PostgreSQL from VPC (AgentCore Runtime)"
       Tags:
         - Key: Name
           Value: !Sub '${AWS::StackName}-VSCode-SG'
@@ -579,6 +584,35 @@ Resources:
 
             # python 심볼릭 링크 (AL2023에는 python3만 있음)
             ln -sf /home/ec2-user/aiops_agent/.venv/bin/python /usr/local/bin/python
+
+            # ── Steampipe 설치 + PostgreSQL 서비스 모드 ──
+            /bin/sh -c "$(curl -fsSL https://steampipe.io/install/steampipe.sh)"
+            sudo -u ec2-user steampipe plugin install aws
+            sudo -u ec2-user steampipe plugin install kubernetes
+
+            # Steampipe systemd 서비스 (PostgreSQL 프로토콜, AgentCore Runtime 호환)
+            cat > /etc/systemd/system/steampipe.service << 'STEAMPIPE_SVC'
+            [Unit]
+            Description=Steampipe Service (PostgreSQL wire protocol)
+            After=network.target
+
+            [Service]
+            Type=simple
+            User=ec2-user
+            Environment=HOME=/home/ec2-user
+            WorkingDirectory=/home/ec2-user
+            ExecStart=/usr/local/bin/steampipe service start --foreground --listen network --port 9193 --database-password steampipe_aiops
+            ExecStop=/usr/local/bin/steampipe service stop
+            Restart=on-failure
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            STEAMPIPE_SVC
+            systemctl daemon-reload
+            systemctl enable steampipe
+            systemctl start steampipe
+            echo "Steampipe service started on port 9193"
 
             # ── Streamlit 시작 ──
             if [ -f /home/ec2-user/aiops_agent/dashboard/app.py ]; then

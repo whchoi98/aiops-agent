@@ -27,11 +27,13 @@ from agents.utils import (
 
 GATEWAY_NAME = "aiops-gateway"
 TARGET_NAME = "aiops-tools"
+TARGET_STEAMPIPE_NAME = "aiops-steampipe"
 API_SPEC_PATH = os.path.join(os.path.dirname(__file__), "api_spec.json")
+API_SPEC_STEAMPIPE_PATH = os.path.join(os.path.dirname(__file__), "api_spec_steampipe.json")
 
 
-def _load_api_spec() -> list[dict]:
-    with open(API_SPEC_PATH, encoding="utf-8") as f:
+def _load_api_spec(path: str | None = None) -> list[dict]:
+    with open(path or API_SPEC_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -192,9 +194,57 @@ def create_gateway() -> None:
     else:
         print("WARNING: Target did not reach READY state within timeout")
 
-    # 6. SSM 에 저장
+    # 6. (선택) Steampipe ECS Fargate 타겟 생성
+    steampipe_target_id = None
+    try:
+        steampipe_mcp_url = get_ssm_parameter(f"{SSM_PREFIX}/steampipe_mcp_url")
+        print(f"\nSteampipe MCP URL found: {steampipe_mcp_url}")
+        print("Creating Steampipe Gateway Target (ECS Fargate)...")
+
+        steampipe_spec = _load_api_spec(API_SPEC_STEAMPIPE_PATH)
+        sp_response = client.create_gateway_target(
+            gatewayIdentifier=gateway_id,
+            name=TARGET_STEAMPIPE_NAME,
+            targetConfiguration={
+                "mcp": {
+                    "url": {
+                        "url": steampipe_mcp_url,
+                        "toolSchema": {
+                            "inlinePayload": steampipe_spec,
+                        },
+                    }
+                }
+            },
+            credentialProviderConfigurations=[
+                {
+                    "credentialProviderType": "GATEWAY_IAM_ROLE",
+                }
+            ],
+        )
+        steampipe_target_id = sp_response["targetId"]
+        print(f"Steampipe Target created: {steampipe_target_id}")
+
+        # 대기
+        print("Waiting for Steampipe target to become ACTIVE...")
+        for _ in range(60):
+            sp_status = client.get_gateway_target(
+                gatewayIdentifier=gateway_id, targetId=steampipe_target_id
+            )
+            if sp_status.get("status") == "READY":
+                break
+            time.sleep(5)
+        else:
+            print("WARNING: Steampipe target did not reach READY state")
+
+    except Exception as e:
+        print(f"\nSteampipe ECS target skipped: {e}")
+        print("  (Deploy Phase 3 first: bash cloudformation/deploy.sh phase3)")
+
+    # 7. SSM 에 저장
     put_ssm_parameter(f"{SSM_PREFIX}/gateway_id", gateway_id)
     put_ssm_parameter(f"{SSM_PREFIX}/gateway_target_id", target_id)
+    if steampipe_target_id:
+        put_ssm_parameter(f"{SSM_PREFIX}/gateway_steampipe_target_id", steampipe_target_id)
     put_ssm_parameter(f"{SSM_PREFIX}/cognito_pool_id", pool_id)
     put_ssm_parameter(f"{SSM_PREFIX}/cognito_client_id", cognito_client_id)
     print("SSM parameters saved.")
@@ -204,10 +254,11 @@ def create_gateway() -> None:
     print("\n=== Gateway Setup Complete ===")
     print(f"  Gateway ID:     {gateway_id}")
     print(f"  Gateway URL:    {gateway_url}")
-    print(f"  Target ID:      {target_id}")
+    print(f"  Target (Lambda):     {target_id} ({len(api_spec)} tools)")
+    if steampipe_target_id:
+        print(f"  Target (Steampipe):  {steampipe_target_id} (15 tools)")
     print(f"  Cognito Pool:   {pool_id}")
     print(f"  Cognito Client: {cognito_client_id}")
-    print(f"  Tools:          {len(api_spec)}")
 
 
 def delete_gateway() -> None:
