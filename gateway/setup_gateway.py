@@ -164,21 +164,13 @@ def create_gateway() -> None:
         targetConfiguration={
             "mcp": {
                 "lambda": {
-                    "functionArn": lambda_arn,
+                    "lambdaArn": lambda_arn,
                     "toolSchema": {
                         "inlinePayload": api_spec,
                     },
                 }
             }
         },
-        credentialProviderConfigurations=[
-            {
-                "credentialProviderType": "GATEWAY_IAM_ROLE",
-                "credentialProvider": {
-                    "roleArn": gateway_role_arn,
-                },
-            }
-        ],
     )
     target_id = target_response["gatewayTargetId"]
     print(f"Gateway Target created: {target_id}")
