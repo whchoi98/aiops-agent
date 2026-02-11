@@ -132,6 +132,7 @@ def create_gateway() -> None:
     gw_response = client.create_gateway(
         name=GATEWAY_NAME,
         protocolType="MCP",
+        roleArn=gateway_role_arn,
         authorizerType="CUSTOM_JWT",
         authorizerConfiguration={
             "customJWTAuthorizer": {
