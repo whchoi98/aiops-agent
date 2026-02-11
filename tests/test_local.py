@@ -55,8 +55,7 @@ class TestAIOpsAgentStructure:
                 tool_names.append(name)
 
         expected = [
-            "get_cloudwatch_metrics",
-            "get_cloudwatch_alarms",
+            "describe_ec2_instances",
             "list_ec2_instances",
             "get_cost_and_usage",
             "describe_vpcs",
@@ -68,13 +67,6 @@ class TestAIOpsAgentStructure:
 
 class TestToolModuleImports:
     """각 도구 모듈 import 검증"""
-
-    def test_import_cloudwatch_tools(self):
-        mod = importlib.import_module("tools.cloudwatch_tools")
-        assert hasattr(mod, "get_cloudwatch_metrics")
-        assert hasattr(mod, "get_cloudwatch_alarms")
-        assert hasattr(mod, "query_cloudwatch_logs")
-        assert hasattr(mod, "describe_ec2_instances")
 
     def test_import_vpc_tools(self):
         mod = importlib.import_module("tools.vpc_tools")

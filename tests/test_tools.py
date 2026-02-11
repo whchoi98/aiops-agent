@@ -45,78 +45,13 @@ def ec2_instances(ec2_client):
 
 
 # ---------------------------------------------------------------------------
-# CloudWatch Tools Tests
+# EC2 describe_ec2_instances Tests (moved from cloudwatch_tools to ec2_tools)
 # ---------------------------------------------------------------------------
 
-class TestCloudWatchTools:
-    @mock_aws
-    def test_get_cloudwatch_alarms_empty(self):
-        from tools.cloudwatch_tools import get_cloudwatch_alarms
-
-        result = get_cloudwatch_alarms()
-        assert result["total_count"] == 0
-        assert result["alarm_count"] == 0
-        assert result["ok_count"] == 0
-        assert result["alarms"] == []
-
-    @mock_aws
-    def test_get_cloudwatch_alarms_with_alarm(self):
-        from tools.cloudwatch_tools import get_cloudwatch_alarms
-
-        client = boto3.client("cloudwatch", region_name="ap-northeast-2")
-        client.put_metric_alarm(
-            AlarmName="HighCPU",
-            Namespace="AWS/EC2",
-            MetricName="CPUUtilization",
-            ComparisonOperator="GreaterThanThreshold",
-            EvaluationPeriods=1,
-            Period=300,
-            Statistic="Average",
-            Threshold=80.0,
-        )
-
-        result = get_cloudwatch_alarms()
-        assert result["total_count"] == 1
-        assert result["alarms"][0]["name"] == "HighCPU"
-        assert result["alarms"][0]["namespace"] == "AWS/EC2"
-
-    @mock_aws
-    def test_get_cloudwatch_alarms_filter_by_state(self):
-        from tools.cloudwatch_tools import get_cloudwatch_alarms
-
-        client = boto3.client("cloudwatch", region_name="ap-northeast-2")
-        client.put_metric_alarm(
-            AlarmName="TestAlarm",
-            Namespace="AWS/EC2",
-            MetricName="CPUUtilization",
-            ComparisonOperator="GreaterThanThreshold",
-            EvaluationPeriods=1,
-            Period=300,
-            Statistic="Average",
-            Threshold=80.0,
-        )
-
-        result = get_cloudwatch_alarms(state="ALARM")
-        # moto creates alarms in OK state by default
-        assert result["total_count"] == 0
-
-    @mock_aws
-    def test_get_cloudwatch_metrics(self):
-        from tools.cloudwatch_tools import get_cloudwatch_metrics
-
-        result = get_cloudwatch_metrics(
-            namespace="AWS/EC2",
-            metric_name="CPUUtilization",
-            period_hours=1,
-        )
-        assert result["namespace"] == "AWS/EC2"
-        assert result["metric_name"] == "CPUUtilization"
-        assert "datapoints" in result
-        assert "summary" in result
-
+class TestDescribeEC2Instances:
     @mock_aws
     def test_describe_ec2_instances_empty(self):
-        from tools.cloudwatch_tools import describe_ec2_instances
+        from tools.ec2_tools import describe_ec2_instances
 
         result = describe_ec2_instances()
         assert result["total_count"] == 0
@@ -124,7 +59,7 @@ class TestCloudWatchTools:
 
     @mock_aws
     def test_describe_ec2_instances_with_data(self):
-        from tools.cloudwatch_tools import describe_ec2_instances
+        from tools.ec2_tools import describe_ec2_instances
 
         ec2 = boto3.client("ec2", region_name="ap-northeast-2")
         ec2.run_instances(
