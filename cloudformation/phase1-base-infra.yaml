@@ -553,29 +553,43 @@ Resources:
           systemctl daemon-reload
           systemctl enable streamlit
 
-          # ── aiops_agent 저장소 클론 ──
+          # ── aiops_agent 저장소 클론 (최대 3회 재시도) ──
           cd /home/ec2-user
-          sudo -u ec2-user git clone https://github.com/whchoi98/aiops-agent.git aiops_agent || true
+          CLONE_OK=false
+          for i in 1 2 3; do
+            if sudo -u ec2-user git clone https://github.com/whchoi98/aiops-agent.git aiops_agent; then
+              CLONE_OK=true
+              break
+            fi
+            echo "WARNING: git clone attempt $i failed, retrying in 10s..."
+            rm -rf aiops_agent
+            sleep 10
+          done
 
-          # ── Python 3.12 venv + 의존성 설치 ──
-          cd /home/ec2-user/aiops_agent
-          sudo -u ec2-user python3.12 -m venv .venv
-          if [ -f requirements.txt ]; then
-            sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt'
+          if [ "$CLONE_OK" = true ] && [ -d /home/ec2-user/aiops_agent ]; then
+            # ── Python 3.12 venv + 의존성 설치 ──
+            cd /home/ec2-user/aiops_agent
+            sudo -u ec2-user python3.12 -m venv .venv
+            if [ -f requirements.txt ]; then
+              sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt'
+            else
+              sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install streamlit pandas strands-agents boto3'
+            fi
+            echo "Python 3.12 venv + dependencies installed"
+
+            # python 심볼릭 링크 (AL2023에는 python3만 있음)
+            ln -sf /home/ec2-user/aiops_agent/.venv/bin/python /usr/local/bin/python
+
+            # ── Streamlit 시작 ──
+            if [ -f /home/ec2-user/aiops_agent/dashboard/app.py ]; then
+              systemctl start streamlit
+              echo "Streamlit service started"
+            else
+              echo "WARNING: dashboard/app.py not found, streamlit not started"
+            fi
           else
-            sudo -u ec2-user bash -c 'source .venv/bin/activate && pip install --upgrade pip && pip install streamlit pandas strands-agents boto3'
-          fi
-          echo "Python 3.12 venv + dependencies installed"
-
-          # python 심볼릭 링크 (AL2023에는 python3만 있음)
-          ln -sf /home/ec2-user/aiops_agent/.venv/bin/python /usr/local/bin/python
-
-          # ── Streamlit 시작 ──
-          if [ -f /home/ec2-user/aiops_agent/dashboard/app.py ]; then
-            systemctl start streamlit
-            echo "Streamlit service started"
-          else
-            echo "WARNING: dashboard/app.py not found, streamlit not started"
+            echo "ERROR: git clone failed after 3 attempts. venv and streamlit skipped."
+            echo "Run manually: cd /home/ec2-user && git clone https://github.com/whchoi98/aiops-agent.git aiops_agent"
           fi
 
           # Signal completion
