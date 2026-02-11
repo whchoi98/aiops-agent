@@ -9,3 +9,8 @@ pyyaml
 moto[all]>=5.0.0
 pytest
 pytest-asyncio
+# Dashboard
+streamlit>=1.45.0
+plotly>=5.24.0
+pandas>=2.0.0
+pyjwt>=2.8.0
